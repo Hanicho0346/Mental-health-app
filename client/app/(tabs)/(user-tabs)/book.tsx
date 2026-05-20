@@ -133,7 +133,7 @@ export default function BookScreen() {
       Alert.alert(
         "Booked",
         "Your session is saved. You will receive a confirmation in chat.",
-        [{ text: "OK", onPress: () => router.push("/(tabs)/chats") }],
+        [{ text: "OK", onPress: () => router.push("/(tabs)/(user-tabs)/home") }],
       );
     } catch (e) {
       logClientError("book.confirmBooking", e, {

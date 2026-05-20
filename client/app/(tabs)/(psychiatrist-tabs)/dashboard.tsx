@@ -62,8 +62,8 @@ export default function DashboardScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  const [alerts, setAlerts] = useState([]);
-  const [appointments, setAppointments] = useState([]);
+  const [alerts, setAlerts] = useState<any[]>([]);
+  const [appointments, setAppointments] = useState<any[]>([]);
   const [statValues, setStatValues] = useState({
     appointmentsToday: 0,
     patientsCount: 0,
