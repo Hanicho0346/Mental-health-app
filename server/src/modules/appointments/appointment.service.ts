@@ -31,7 +31,7 @@ export async function listPublicCounselors(): Promise<CounselorPublicDto[]> {
     .limit(50)
     .exec();
 
-  return counselors.map((u) => ({
+  return (counselors as any[]).map((u) => ({
     id: u._id.toString(),
     full_name: u.full_name,
     full_name_am: "",

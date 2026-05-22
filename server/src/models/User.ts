@@ -39,6 +39,13 @@ const userSchema = new Schema(
     uploaded_documents: { type: [uploadedDocSchema], default: [] },
     approved_by: { type: Schema.Types.ObjectId, ref: 'User', required: false },
     approved_at: { type: Date, required: false },
+
+    // ── Chat fields ──────────────────────────────────────────────────────────
+    clerk_id:       { type: String, default: '', sparse: true },
+    chat_username:  { type: String, default: '' },
+    is_online:      { type: Boolean, default: false },
+    socket_id:      { type: String, default: '' },
+    // ────────────────────────────────────────────────────────────────────────
   },
   {
     timestamps: { createdAt: 'createdAt', updatedAt: false },

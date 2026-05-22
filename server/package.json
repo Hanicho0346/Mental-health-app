@@ -9,6 +9,7 @@
     "dev": "tsx watch src/index.ts"
   },
   "dependencies": {
+    "@clerk/backend": "^3.4.11",
     "bcryptjs": "^3.0.2",
     "cloudinary": "^2.10.0",
     "compression": "^1.8.1",

@@ -3,7 +3,7 @@ import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { useChatStore, ChatMessage, CallLog } from '@/stores/chatStore';
 
-const CHAT_PORT = 3000;
+const CHAT_PORT = 4000;
 
 function resolveChatServer(): string {
   const hostUri = Constants.expoConfig?.hostUri;
@@ -41,7 +41,7 @@ export function connectSocket(username: string): void {
 
   socket.on('users-updated', async () => {
     try {
-      const r = await fetch(`${CHAT_SERVER}/api/users`);
+      const r = await fetch(`${CHAT_SERVER}/api/chat/users`);
       const users = await r.json();
       useChatStore.getState().setUsers(users);
     } catch { /* ignore */ }
@@ -94,7 +94,7 @@ export async function apiLogin(
   username: string,
   password: string,
 ): Promise<{ userId: string; username: string }> {
-  const r = await fetch(`${CHAT_SERVER}/api/login`, {
+  const r = await fetch(`${CHAT_SERVER}/api/chat/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, password }),
@@ -105,14 +105,14 @@ export async function apiLogin(
 }
 
 export async function apiLoadUsers(): Promise<void> {
-  const r = await fetch(`${CHAT_SERVER}/api/users`);
+  const r = await fetch(`${CHAT_SERVER}/api/chat/users`);
   useChatStore.getState().setUsers(await r.json());
 }
 
 export async function apiLoadTimeline(userA: string, userB: string): Promise<void> {
   const [mRes, cRes] = await Promise.all([
-    fetch(`${CHAT_SERVER}/api/messages/${userA}/${userB}`),
-    fetch(`${CHAT_SERVER}/api/calls/${userA}/${userB}`),
+    fetch(`${CHAT_SERVER}/api/chat/messages/${userA}/${userB}`),
+    fetch(`${CHAT_SERVER}/api/chat/calls/${userA}/${userB}`),
   ]);
   const messages: ChatMessage[] = await mRes.json();
   const calls: CallLog[] = await cRes.json();
@@ -130,7 +130,7 @@ export async function apiLoadTimeline(userA: string, userB: string): Promise<voi
 export async function apiUploadVoice(uri: string): Promise<string> {
   const fd = new FormData();
   fd.append('audio', { uri, name: 'voice.webm', type: 'audio/webm' } as any);
-  const r = await fetch(`${CHAT_SERVER}/api/upload-voice`, { method: 'POST', body: fd });
+  const r = await fetch(`${CHAT_SERVER}/api/chat/upload-voice`, { method: 'POST', body: fd });
   const d = await r.json();
   if (d.error) throw new Error(d.error);
   return d.fileUrl as string;

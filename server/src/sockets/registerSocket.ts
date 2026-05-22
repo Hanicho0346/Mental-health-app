@@ -7,6 +7,12 @@ import { roomForUser } from '../controllers/messageController.js';
 import { persistMessage } from '../services/messageService.js';
 import { formatUnknownError, logServerError, logServerWarn } from '../utils/logger.js';
 import { verifyAccessToken } from '../utils/jwt.js';
+import { ChatMessage } from '../models/ChatMessage.js';
+import { CallLog } from '../models/CallLog.js';
+import { User } from '../models/User.js';
+
+// Chat online users map: username → socketId
+const onlineUsers: Record<string, string> = {};
 
 export function registerSocketHandlers(io: IOServer): void {
   io.use((socket, next) => {
@@ -69,6 +75,71 @@ export function registerSocketHandlers(io: IOServer): void {
         }
       }
     );
+
+    // ── Chat events ───────────────────────────────────────────────────────────
+
+    socket.on('user-online', async ({ username }: { username: string }) => {
+      (socket as any)._chatUsername = username;
+      onlineUsers[username] = socket.id;
+      await User.findOneAndUpdate({ chat_username: username }, { is_online: true, socket_id: socket.id });
+      io.emit('users-updated');
+    });
+
+    socket.on('send-message', async ({ from, to, content: text }: { from: string; to: string; content: string }) => {
+      const msg = await ChatMessage.create({ from, to, type: 'text', content: text });
+      const rid = onlineUsers[to];
+      if (rid) io.to(rid).emit('receive-message', msg);
+      socket.emit('receive-message', msg);
+    });
+
+    socket.on('send-voice', async ({ from, to, fileUrl }: { from: string; to: string; fileUrl: string }) => {
+      const msg = await ChatMessage.create({ from, to, type: 'voice', fileUrl });
+      const rid = onlineUsers[to];
+      if (rid) io.to(rid).emit('receive-message', msg);
+      socket.emit('receive-message', msg);
+    });
+
+    socket.on('call-user', ({ from, to }: { from: string; to: string }) => {
+      (socket as any)._callData = { caller: from, recipient: to, startedAt: new Date() };
+      const rid = onlineUsers[to];
+      if (rid) io.to(rid).emit('incoming-call', { from });
+    });
+
+    socket.on('call-accepted', ({ from, to }: { from: string; to: string }) => {
+      const rid = onlineUsers[to];
+      if (rid) io.to(rid).emit('call-accepted', { from });
+    });
+
+    socket.on('call-declined', ({ from, to }: { from: string; to: string }) => {
+      const rid = onlineUsers[to];
+      if (rid) io.to(rid).emit('call-declined', { from });
+    });
+
+    socket.on('sp-signal', ({ to, signal }: { to: string; signal: unknown }) => {
+      const rid = onlineUsers[to];
+      if (rid) io.to(rid).emit('sp-signal', { signal });
+    });
+
+    socket.on('call-ended', async ({ from, to, duration }: { from: string; to: string; duration: number }) => {
+      const rid = onlineUsers[to];
+      if (rid) io.to(rid).emit('call-ended');
+      await CallLog.create({
+        caller: from, recipient: to,
+        status: 'completed', duration,
+        startedAt: (socket as any)._callData?.startedAt || new Date(),
+        endedAt: new Date(),
+      });
+    });
+
+    socket.on('disconnect', async () => {
+      const username = (socket as any)._chatUsername;
+      if (username) {
+        delete onlineUsers[username];
+        await User.findOneAndUpdate({ chat_username: username }, { is_online: false, socket_id: '' });
+        io.emit('users-updated');
+      }
+    });
+
   });
 }
 

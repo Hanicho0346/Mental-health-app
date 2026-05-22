@@ -12,6 +12,7 @@ import configRoutes from './routes/configRoutes.js';
 import messageRoutes from './routes/messageRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 import doctorRoutes from './routes/doctor.routes.js';
+import chatRoutes from './routes/chatRoutes.js';
 export function createApp() {
   const app = express();
 
@@ -47,6 +48,7 @@ export function createApp() {
   app.use('/api/messages', messageRoutes);
   app.use('/api/appointments', appointmentRoutes);
  app.use('/api/doctor', doctorRoutes);
+  app.use('/api/chat', chatRoutes);
 
   app.use((_req, res) => {
     res.status(404).json({ error: 'Not found' });

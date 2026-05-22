@@ -37,7 +37,7 @@ export default function ChatRoomEntry() {
         const fullName = user!.fullName ?? username;
 
         // Register/login on chat server using Clerk identity
-        const res = await fetch(`${CHAT_SERVER}/api/login`, {
+        const res = await fetch(`${CHAT_SERVER}/api/chat/login`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

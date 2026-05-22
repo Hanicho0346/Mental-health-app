@@ -14,6 +14,13 @@ import {
 import { useChatStore, CallLog, ChatMessage } from '@/stores/chatStore';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { Audio } from 'expo-av';
+import {
+  RTCPeerConnection,
+  RTCIceCandidate,
+  RTCSessionDescription,
+  mediaDevices,
+  RTCView,
+} from 'react-native-webrtc';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, {
   useCallback,
@@ -54,6 +61,46 @@ function fmtDur(sec: number): string {
 type RecState = 'idle' | 'recording' | 'recorded' | 'uploading';
 type CallState = 'idle' | 'calling' | 'incoming' | 'in-call';
 
+
+// ── VoicePlayer ──────────────────────────────────────────────────────────────
+function VoicePlayer({ fileUrl, mine }: { fileUrl: string; mine: boolean }) {
+  const [sound, setSound] = React.useState<Audio.Sound | null>(null);
+  const [playing, setPlaying] = React.useState(false);
+  const [loading, setLoading] = React.useState(false);
+
+  React.useEffect(() => { return () => { sound?.unloadAsync(); }; }, [sound]);
+
+  async function togglePlay(): Promise<void> {
+    if (loading) return;
+    if (playing && sound) { await sound.pauseAsync(); setPlaying(false); return; }
+    if (sound) { await sound.playAsync(); setPlaying(true); return; }
+    setLoading(true);
+    try {
+      await Audio.setAudioModeAsync({ playsInSilentModeIOS: true, allowsRecordingIOS: false });
+      const { sound: ns } = await Audio.Sound.createAsync(
+        { uri: fileUrl },
+        { shouldPlay: true },
+        (st) => { if ('didJustFinish' in st && st.didJustFinish) { setPlaying(false); ns.unloadAsync(); setSound(null); } }
+      );
+      setSound(ns); setPlaying(true);
+    } catch { Alert.alert('Playback error', 'Could not play voice message.'); }
+    finally { setLoading(false); }
+  }
+
+  const ic = mine ? 'rgba(255,255,255,0.9)' : '#2563eb';
+  const bg = mine ? 'rgba(255,255,255,0.2)' : '#eff6ff';
+  return (
+    <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 2 }} onPress={() => void togglePlay()} activeOpacity={0.8}>
+      <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: bg, justifyContent: 'center', alignItems: 'center' }}>
+        {loading ? <ActivityIndicator size="small" color={ic} /> : <Feather name={playing ? 'pause' : 'play'} size={16} color={ic} />}
+      </View>
+      <Text style={{ fontSize: 13, color: mine ? 'rgba(255,255,255,0.85)' : '#2563eb', fontWeight: '600' }}>
+        {playing ? 'Playing…' : 'Voice message'}
+      </Text>
+    </TouchableOpacity>
+  );
+}
+
 export default function PeerChatScreen() {
   const { peer } = useLocalSearchParams<{ peer: string }>();
   const me = useChatStore((s) => s.me);
@@ -72,6 +119,12 @@ export default function PeerChatScreen() {
   const [callSec, setCallSec] = useState(0);
   const [muted, setMuted] = useState(false);
   const [incomingFrom, setIncomingFrom] = useState<string | null>(null);
+
+  // WebRTC
+  const pcRef = useRef<RTCPeerConnection | null>(null);
+  const localStreamRef = useRef<any>(null);
+  const [localStream, setLocalStream] = useState<any>(null);
+  const [remoteStream, setRemoteStream] = useState<any>(null);
 
   const recRef = useRef<Audio.Recording | null>(null);
   const recTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -98,8 +151,14 @@ export default function PeerChatScreen() {
       setIncomingFrom(from);
       setCallState('incoming');
     };
-    const onAccepted = () => {
+    const onAccepted = async () => {
       enterCall();
+      // Caller creates and sends offer
+      if (pcRef.current) {
+        const offer = await pcRef.current.createOffer({});
+        await pcRef.current.setLocalDescription(offer);
+        emitSpSignal(peer ?? '', offer);
+      }
     };
     const onDeclined = () => {
       setCallState('idle');
@@ -107,13 +166,35 @@ export default function PeerChatScreen() {
     };
     const onEnded = () => endCall(false);
 
+    const onSpSignal = async ({ signal }: { signal: any }) => {
+      if (!pcRef.current) return;
+      if (signal.type === 'offer') {
+        const stream = localStreamRef.current || await startLocalStream();
+        if (!pcRef.current) {
+          const pc = createPC();
+          pcRef.current = pc;
+          stream.getTracks().forEach((t: any) => pc.addTrack(t, stream));
+        }
+        await pcRef.current.setRemoteDescription(new RTCSessionDescription(signal));
+        const answer = await pcRef.current.createAnswer();
+        await pcRef.current.setLocalDescription(answer);
+        emitSpSignal(peer ?? '', answer);
+      } else if (signal.type === 'answer') {
+        await pcRef.current.setRemoteDescription(new RTCSessionDescription(signal));
+      } else if (signal.type === 'ice' && signal.candidate) {
+        await pcRef.current.addIceCandidate(new RTCIceCandidate(signal.candidate));
+      }
+    };
+
     socket.on('incoming-call', onIncoming);
+    socket.on('sp-signal', onSpSignal);
     socket.on('call-accepted', onAccepted);
     socket.on('call-declined', onDeclined);
     socket.on('call-ended', onEnded);
 
     return () => {
       socket.off('incoming-call', onIncoming);
+      socket.off('sp-signal', onSpSignal);
       socket.off('call-accepted', onAccepted);
       socket.off('call-declined', onDeclined);
       socket.off('call-ended', onEnded);
@@ -186,10 +267,71 @@ export default function PeerChatScreen() {
   }
 
   // ── call helpers ─────────────────────────────────────────────────────────
+  // ── WebRTC helpers ─────────────────────────────────────────────────────────
+  const TURN_SERVERS = {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun.relay.metered.ca:80' },
+      {
+        urls: 'turn:standard.relay.metered.ca:80',
+        username: 'c083cbeec58495107de6beac',
+        credential: '8eWUdewcjE634aJH',
+      },
+      {
+        urls: 'turn:standard.relay.metered.ca:443',
+        username: 'c083cbeec58495107de6beac',
+        credential: '8eWUdewcjE634aJH',
+      },
+    ],
+  };
+
+  function createPC(): RTCPeerConnection {
+    const pc = new RTCPeerConnection(TURN_SERVERS) as any;
+
+    pc.addEventListener("icecandidate", (e: any) => {
+      if (e.candidate) {
+        emitSpSignal(peer ?? '', { type: 'ice', candidate: e.candidate });
+      }
+    });
+
+    pc.addEventListener('track', (e: any) => {
+      if (e.streams && e.streams[0]) {
+        setRemoteStream(e.streams[0]);
+      }
+    });
+
+    return pc;
+  }
+
+  async function startLocalStream(): Promise<any> {
+    const stream = await mediaDevices.getUserMedia({
+      audio: true,
+      video: { facingMode: 'user', width: 640, height: 480 },
+    });
+    setLocalStream(stream);
+    localStreamRef.current = stream;
+    return stream;
+  }
+
+  function stopStreams(): void {
+    localStreamRef.current?.getTracks().forEach((t: any) => t.stop());
+    localStreamRef.current = null;
+    setLocalStream(null);
+    setRemoteStream(null);
+    pcRef.current?.close();
+    pcRef.current = null;
+  }
+
   function startCall(): void {
     if (!me || !peer) return;
     emitCallUser(me.username, peer);
     setCallState('calling');
+    // Start local stream immediately so caller sees themselves
+    void startLocalStream().then(async (stream) => {
+      const pc = createPC();
+      pcRef.current = pc;
+      stream.getTracks().forEach((t: any) => pc.addTrack(t, stream));
+    });
   }
 
   function acceptCall(): void {
@@ -197,6 +339,8 @@ export default function PeerChatScreen() {
     emitCallAccepted(me.username, incomingFrom);
     setIncomingFrom(null);
     enterCall();
+    // Start local stream for callee
+    void startLocalStream();
   }
 
   function declineCall(): void {
@@ -233,7 +377,9 @@ export default function PeerChatScreen() {
         };
         appendCallLog(log);
       }
-      setCallState('idle');
+      stopStreams();
+    stopStreams();
+    setCallState('idle');
       setCallSec(0);
       setMuted(false);
       setIncomingFrom(null);
@@ -267,10 +413,7 @@ export default function PeerChatScreen() {
               <Text style={[s.bubTxt, mine && s.bubTxtMe]}>{item.content}</Text>
             )}
             {item.type === 'voice' && (
-              <View style={s.voiceMsg}>
-                <Feather name="mic" size={14} color={mine ? 'rgba(255,255,255,0.8)' : '#2563eb'} />
-                <Text style={[s.voiceLbl, mine && s.voiceLblMe]}>Voice message</Text>
-              </View>
+              <VoicePlayer fileUrl={item.fileUrl ?? ''} mine={mine} />
             )}
             <Text style={[s.ts, mine && s.tsMe]}>{fmt(item.timestamp)}</Text>
           </View>
@@ -412,16 +555,42 @@ export default function PeerChatScreen() {
       <Modal visible={callState === 'in-call'} transparent animationType="fade">
         <View style={s.vscr}>
           <Text style={s.clbl}>{peer} · {fmtS(callSec)}</Text>
-          <View style={s.videoPlaceholder}>
-            <Feather name="video" size={48} color="rgba(255,255,255,0.3)" />
-            <Text style={s.videoNote}>
-              Video call active{'\n'}(WebRTC video requires native modules)
-            </Text>
+          <View style={s.videoWrap}>
+            {remoteStream ? (
+              <RTCView
+                streamURL={remoteStream.toURL()}
+                style={s.remoteVideo}
+                objectFit="cover"
+                mirror={false}
+              />
+            ) : (
+              <View style={s.remoteVideo}>
+                <ActivityIndicator color="#fff" size="large" />
+                <Text style={{ color: 'rgba(255,255,255,0.5)', marginTop: 12, fontSize: 13 }}>
+                  Connecting video…
+                </Text>
+              </View>
+            )}
+            {localStream && (
+              <RTCView
+                streamURL={localStream.toURL()}
+                style={s.localVideo}
+                objectFit="cover"
+                mirror={true}
+                zOrder={1}
+              />
+            )}
           </View>
           <View style={s.cctrl}>
             <TouchableOpacity
               style={[s.ctbtn, s.ctmute]}
-              onPress={() => setMuted((m) => !m)}
+              onPress={() => {
+                setMuted((m) => {
+                  const next = !m;
+                  localStreamRef.current?.getAudioTracks().forEach((t: any) => { t.enabled = !next; });
+                  return next;
+                });
+              }}
             >
               <Feather name={muted ? 'mic-off' : 'mic'} size={22} color="#fff" />
             </TouchableOpacity>
@@ -507,7 +676,9 @@ const s = StyleSheet.create({
   // active call screen
   vscr: { flex: 1, backgroundColor: '#0a0a0a', justifyContent: 'center', alignItems: 'center', gap: 24, padding: 24 },
   clbl: { color: 'rgba(255,255,255,0.65)', fontSize: 16, letterSpacing: 0.3 },
-  videoPlaceholder: { width: '100%', maxWidth: 400, aspectRatio: 4 / 3, backgroundColor: '#1a1a1a', borderRadius: 16, justifyContent: 'center', alignItems: 'center', gap: 12 },
+  videoWrap: { width: '100%', aspectRatio: 3 / 4, position: 'relative', borderRadius: 16, overflow: 'hidden', backgroundColor: '#1a1a1a' },
+  remoteVideo: { width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' },
+  localVideo: { position: 'absolute', bottom: 12, right: 12, width: 90, height: 130, borderRadius: 10, borderWidth: 2, borderColor: 'rgba(255,255,255,0.3)' },
   videoNote: { color: 'rgba(255,255,255,0.4)', fontSize: 13, textAlign: 'center', lineHeight: 20 },
   cctrl: { flexDirection: 'row', gap: 18 },
   ctbtn: { width: 58, height: 58, borderRadius: 29, justifyContent: 'center', alignItems: 'center' },
