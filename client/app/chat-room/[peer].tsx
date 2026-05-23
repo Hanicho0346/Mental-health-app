@@ -274,13 +274,13 @@ export default function PeerChatScreen() {
       { urls: 'stun:stun.relay.metered.ca:80' },
       {
         urls: 'turn:standard.relay.metered.ca:80',
-        username: 'c083cbeec58495107de6beac',
-        credential: '8eWUdewcjE634aJH',
+        username: process.env.EXPO_PUBLIC_TURN_USERNAME ?? '',
+        credential: process.env.EXPO_PUBLIC_TURN_CREDENTIAL ?? '',
       },
       {
         urls: 'turn:standard.relay.metered.ca:443',
-        username: 'c083cbeec58495107de6beac',
-        credential: '8eWUdewcjE634aJH',
+        username: process.env.EXPO_PUBLIC_TURN_USERNAME ?? '',
+        credential: process.env.EXPO_PUBLIC_TURN_CREDENTIAL ?? '',
       },
     ],
   };
