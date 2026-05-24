@@ -291,6 +291,21 @@ class DoctorService {
       await safeUnlinkTemp(file.path);
     }
   }
+  async getSupportVideos(): Promise<Record<string, unknown>[]> {
+  const videos = await db.Video.find()
+    .sort({ createdAt: -1 })
+    .lean()
+    .exec();
+
+  return videos.map((video) => ({
+    id: video._id.toString(),
+    title: video.title,
+    amharic_title: video.amharic_title,
+    category: video.category,
+    video_url: video.video_url,
+    createdAt: video.createdAt,
+  }));
+}
 }
 
 export default new DoctorService();

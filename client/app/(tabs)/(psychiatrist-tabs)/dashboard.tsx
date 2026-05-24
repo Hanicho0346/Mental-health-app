@@ -62,8 +62,8 @@ export default function DashboardScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  const [alerts, setAlerts] = useState([]);
-  const [appointments, setAppointments] = useState([]);
+  const [alerts, setAlerts] = useState<any[]>([]);
+  const [appointments, setAppointments] = useState<any[]>([]);
   const [statValues, setStatValues] = useState({
     appointmentsToday: 0,
     patientsCount: 0,
@@ -341,7 +341,9 @@ export default function DashboardScreen() {
                   style={styles.alertCard}
                   activeOpacity={0.8}
                   onPress={() =>
-                    router.push(`/(tabs)/(psychiatrist-tabs)/users/${alert.patientId}` as any)
+                    router.push(
+                      `/(tabs)/(psychiatrist-tabs)/users/${alert.patientId}` as any,
+                    )
                   }
                 >
                   <View style={styles.alertLeft}>
@@ -366,7 +368,11 @@ export default function DashboardScreen() {
                 Todays Appointments{" "}
                 <Text style={styles.sectionAmharic}>/ የዛሬ ቀጠሮዎች</Text>
               </Text>
-              <TouchableOpacity onPress={() => router.push("/(tabs)/(psychiatrist-tabs)/calender")}>
+              <TouchableOpacity
+                onPress={() =>
+                  router.push("/(tabs)/(psychiatrist-tabs)/calender")
+                }
+              >
                 <Text style={styles.seeAllText}>See all</Text>
               </TouchableOpacity>
             </View>
@@ -403,12 +409,25 @@ export default function DashboardScreen() {
                     <TouchableOpacity
                       style={styles.secondaryButton}
                       onPress={() =>
-                        router.push(`/(tabs)/(psychiatrist-tabs)/users/${appt.patientId}` as any)
+                        router.push(
+                          `/(tabs)/(psychiatrist-tabs)/users/${appt.patientId}` as any,
+                        )
                       }
                     >
                       <Text style={styles.secondaryButtonText}>Profile</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={styles.primaryButton}>
+                    <TouchableOpacity
+                      style={styles.primaryButton}
+                      onPress={() =>
+                        router.push({
+                          pathname: "/chats/[peer]",
+                          params: {
+                            peer: appt.patientId,
+                            startCall: "true",
+                          },
+                        })
+                      }
+                    >
                       <Text style={styles.primaryButtonText}>Start Call</Text>
                     </TouchableOpacity>
                   </View>

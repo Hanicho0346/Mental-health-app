@@ -10,6 +10,7 @@ import {
   getTodayAppointments,
   getUrgentAlerts,
   uploadSupportVideo,
+  getSupportVideos,
 } from '../controllers/doctor.controller.js';
 import { requireAuth } from '../middleware/authenticate.js';
 import { requirePsychiatristAccess } from '../middleware/requireApprovedPsychiatrist.js';
@@ -36,5 +37,6 @@ router.get('/appointments', ...doctorGate, getAppointmentsByDate);
 router.get('/patients/:patientId', ...doctorGate, getPatientProfile);
 router.get('/patients', ...doctorGate, getPatients);
 router.post('/videos/upload', ...doctorGate, upload.single('video'), uploadSupportVideo);
+router.get('/videos', requireAuth, getSupportVideos);
 
 export default router;

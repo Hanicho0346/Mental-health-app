@@ -61,6 +61,93 @@ export const listMessages: RequestHandler = async (req, res) => {
   }
 };
 
+/** Get all conversations for the authenticated user */
+export const getConversations: RequestHandler = async (req, res) => {
+  try {
+    if (!req.userId || !req.auth) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const userId = new mongoose.Types.ObjectId(req.userId);
+    
+    // Get all unique conversations for the user
+    const conversations = await Message.aggregate([
+      {
+        $match: {
+          $or: [
+            { sender_id: userId },
+            { receiver_id: userId }
+          ]
+        }
+      },
+      {
+        $sort: { created_at: -1 }
+      },
+      {
+        $group: {
+          _id: {
+            $cond: [
+              { $eq: ["$sender_id", userId] },
+              "$receiver_id",
+              "$sender_id"
+            ]
+          },
+          lastMessage: { $first: "$content" },
+          lastMessageTime: { $first: "$created_at" },
+          unreadCount: {
+            $sum: {
+              $cond: [
+                { 
+                  $and: [
+                    { $eq: ["$receiver_id", userId] },
+                    { $eq: ["$is_read", false] }
+                  ]
+                },
+                1,
+                0
+              ]
+            }
+          }
+        }
+      },
+      {
+        $lookup: {
+          from: "users",
+          localField: "_id",
+          foreignField: "_id",
+          as: "peer"
+        }
+      },
+      {
+        $unwind: {
+          path: "$peer",
+          preserveNullAndEmptyArrays: true
+        }
+      },
+      {
+        $project: {
+          peerId: "$_id",
+          peerName: { $ifNull: ["$peer.full_name", "$_id"] },
+          peerAvatar: "$peer.avatar_url",
+          isOnline: { $ifNull: ["$peer.is_online", false] },
+          lastMessage: 1,
+          lastMessageTime: 1,
+          unreadCount: 1
+        }
+      },
+      {
+        $sort: { lastMessageTime: -1 }
+      }
+    ]);
+
+    res.json(conversations);
+  } catch (err) {
+    logServerError('getConversations', err, { userId: req.userId });
+    res.status(500).json({ error: 'Failed to load conversations' });
+  }
+};
+
 /** User may only send messages as themselves (sender enforced from JWT). */
 export const createMessage: RequestHandler = async (req, res) => {
   try {

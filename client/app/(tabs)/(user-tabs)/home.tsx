@@ -2,6 +2,8 @@ import { api } from "@/lib/api";
 import { getApiErrorMessage, logClientError } from "@/lib/log";
 import { isPsychiatrist } from "@/lib/tabNavigation";
 import { useAuthStore } from "@/stores/authStore";
+import { useChatStore } from "@/stores/chatStore";
+import { connectSocket } from "@/lib/chatService";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useState } from "react";
@@ -85,6 +87,16 @@ export default function HomeScreen() {
           if (!cancelled) {
             setMe(data);
             setFeeling(feelingFromMoodStatus(data.mood_status));
+            try {
+              // Initialize global chat state and connect socket
+              const username = data.full_name?.trim() || data.id;
+              useChatStore.getState().setMe({ userId: data.id, username });
+              // Pass access token if available to authenticate socket (optional)
+              const token = useAuthStore.getState().accessToken ?? undefined;
+              connectSocket(username, token);
+            } catch (e) {
+              console.warn("chat init failed", e);
+            }
           }
         } catch (e) {
           logClientError("home.loadProfile", e);
@@ -99,7 +111,7 @@ export default function HomeScreen() {
       const fetchVideos = async () => {
         setVideosLoading(true);
         try {
-          const { data } = await api.get<SupportVideo[]>("/support-videos");
+          const { data } = await api.get<SupportVideo[]>("/doctor/videos");
           if (!cancelled) setVideos(data);
         } catch (e) {
           logClientError("home.loadVideos", e);
@@ -146,7 +158,7 @@ export default function HomeScreen() {
 
     // 2. Call backend
     try {
-      await api.post(`/support-videos/${id}/toggle-favorite`);
+      await api.post(`/doctor/videos/${id}/toggle-favorite`);
     } catch (e) {
       // 3. Revert local state on failure
       setVideos((prev) =>
@@ -167,7 +179,7 @@ export default function HomeScreen() {
     );
 
     // 2. Increment in backend (fire and forget)
-    api.post(`/support-videos/${video.id}/listen`).catch((e) => {
+    api.post(`/doctor/videos/${video.id}/listen`).catch((e) => {
       logClientError("home.incrementListen", e);
     });
 
@@ -392,7 +404,9 @@ export default function HomeScreen() {
             <>
               <TouchableOpacity
                 style={styles.actionCard}
-                onPress={() => router.push("/(tabs)/(psychiatrist-tabs)/dashboard")}
+                onPress={() =>
+                  router.push("/(tabs)/(psychiatrist-tabs)/dashboard")
+                }
               >
                 <Feather name="grid" size={24} color="#111827" />
                 <View style={{ marginTop: 16 }}>

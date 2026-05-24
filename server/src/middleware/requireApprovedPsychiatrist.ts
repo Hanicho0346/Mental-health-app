@@ -11,7 +11,7 @@ export const requireApprovedPsychiatrist: RequestHandler = async (req, res, next
     res.status(401).json({ error: 'Unauthorized' });
     return;
   }
-  const user = await User.findById(a.id).select('role verification_status').lean();
+  const user = await User.findById(a.id).select('role verification_status is_approved').lean();
   if (!user) {
     res.status(401).json({ error: 'User not found' });
     return;
@@ -21,7 +21,7 @@ export const requireApprovedPsychiatrist: RequestHandler = async (req, res, next
     return;
   }
   const vs = user.verification_status;
-  if (vs === 'approved') {
+  if (user.is_approved === true || vs === 'approved') {
     next();
     return;
   }
@@ -47,7 +47,7 @@ export const requirePsychiatristAccess: RequestHandler = async (req, res, next) 
     res.status(401).json({ error: 'Unauthorized' });
     return;
   }
-  const user = await User.findById(a.id).select('role verification_status').lean();
+  const user = await User.findById(a.id).select('role verification_status is_approved').lean();
   if (!user) {
     res.status(401).json({ error: 'User not found' });
     return;

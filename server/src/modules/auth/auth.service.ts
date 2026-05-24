@@ -4,7 +4,8 @@ import type { Request } from 'express';
 import mongoose from 'mongoose';
 import { env } from '../../config/env.js';
 import { RefreshSession } from '../../models/RefreshSession.js';
-import { User } from '../../models/User.js';
+import { User, computeIsApproved } from '../../models/User.js';
+import { PsychiatristProfile } from '../../models/PsychiatristProfile.js';
 import { sendMail, sendVerificationCodeToRegisteredEmail } from '../../services/email.service.js';
 import { signAccessToken } from '../../utils/jwt.js';
 import { AppError } from '../../utils/AppError.js';
@@ -34,10 +35,16 @@ export function publicUser(user: {
   avatar_url?: string;
   mood_status?: string;
   createdAt?: Date;
+  updatedAt?: Date;
   role?: UserRole;
   email_verified?: boolean;
   verification_status?: string | null | undefined;
+  is_approved?: boolean;
+  admin_feedback?: string | null;
+  hospital_or_clinic?: string | null;
 }) {
+  const role = pickRole(user.role);
+  const verification_status = user.verification_status ?? null;
   return {
     id: user._id.toString(),
     full_name: user.full_name,
@@ -46,13 +53,19 @@ export function publicUser(user: {
     avatar_url: user.avatar_url ?? '',
     mood_status: user.mood_status ?? '',
     createdAt: user.createdAt,
-    role: pickRole(user.role),
+    updatedAt: user.updatedAt,
+    role,
     email_verified: user.email_verified ?? true,
-    verification_status: user.verification_status ?? null,
+    verification_status,
+    is_approved:
+      user.is_approved ??
+      (role === 'psychiatrist' ? verification_status === 'approved' : true),
+    admin_feedback: user.admin_feedback ?? '',
+    hospital_or_clinic: user.hospital_or_clinic ?? '',
   };
 }
 
-async function issueAuthResponse(
+export async function issueAuthResponse(
   userId: string,
   req: Request
 ): Promise<{
@@ -202,17 +215,19 @@ export async function registerWithPassword(
     }
   }
 
+  const verificationStatus = assignedRole === 'psychiatrist' ? ('pending' as const) : undefined;
   const user = await User.create({
     full_name: input.full_name.trim(),
     email: registeredEmail,
     password: hashed,
     role: assignedRole,
     email_verified: emailVerified,
+    is_approved: computeIsApproved(assignedRole, verificationStatus),
     avatar_url: '',
     mood_status: '',
     ...(assignedRole === 'psychiatrist'
       ? {
-          verification_status: 'pending' as const,
+          verification_status: verificationStatus,
           national_id: input.national_id!.trim(),
           medical_license: input.medical_license?.trim(),
           specialization: input.specialization?.trim(),
@@ -223,6 +238,16 @@ export async function registerWithPassword(
         : {}),
   });
 
+  if (assignedRole === 'psychiatrist') {
+    await PsychiatristProfile.create({
+      user_id: user._id,
+      specialization: input.specialization!.trim(),
+      license_number: input.medical_license!.trim(),
+      years_of_experience: input.experience_years,
+      approval_status: 'pending',
+    });
+  }
+
   if (env.emailVerificationEnabled) {
     await issueEmailVerificationOtp(user._id, registeredEmail);
     return { needsVerification: true, email: registeredEmail };
@@ -232,7 +257,7 @@ export async function registerWithPassword(
 
 export async function loginWithPassword(input: { email: string; password: string }, req: Request) {
   const user = await User.findOne({ email: input.email.trim().toLowerCase() }).select('+password');
-  if (!user || !(await bcrypt.compare(input.password, user.password))) {
+  if (!user?.password || !(await bcrypt.compare(input.password, user.password))) {
     throw new AppError(401, 'Invalid email or password');
   }
   if ((env.emailVerificationEnabled || env.blockUnverifiedLogin) && !user.email_verified) {
