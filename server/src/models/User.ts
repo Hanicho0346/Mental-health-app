@@ -46,10 +46,9 @@ const userSchema = new Schema(
     // ── Psychiatrist-only fields ─────────────────────────────────────────────
     // sparse: true → unique only among non-null values, so regular users (null) don't clash
     national_id: {
-  type: String,
-   sparse: true,
-  default: undefined,
-},
+      type: String,
+      default: undefined,
+    },
     medical_license:  { type: String, required: false, trim: true },
     specialization:   { type: String, required: false, trim: true },
     experience_years: { type: Number, required: false },
@@ -77,6 +76,7 @@ const userSchema = new Schema(
     profile_update_feedback: { type: String, default: '' },
 
     // ── Wallet ───────────────────────────────────────────────────────────────
+    wallet_balance:      { type: Number, default: 0 },
     wallet_transactions: { type: [walletTransactionRefSchema], default: [] },
 
     // ── Presence / Chat ──────────────────────────────────────────────────────

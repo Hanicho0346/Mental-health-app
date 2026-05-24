@@ -30,7 +30,7 @@ export type DocumentType = 'profile' | 'psychiatrist_doc' | 'wellness_video';
 // Fetch full profile - No userId parameter needed for current user
 export const fetchPsychiatristFullProfile = async () => {
   try {
-    const response = await api.get('/psychiatrist/profile');
+    const response = await api.get('/appointments/counselors');
     return response.data;
   } catch (error) {
     console.error('Error fetching psychiatrist profile:', error);
@@ -101,7 +101,7 @@ export const fetchWalletTransactions = async (page: number = 1, limit: number = 
 // If you need to fetch profile for a specific user (e.g., admin viewing)
 export const fetchPsychiatristProfileById = async (userId: string) => {
   try {
-    const response = await api.get(`/psychiatrist/profile/${userId}`);
+    const response = await api.get(`/appointments/counselors/${userId}`);
     return response.data;
   } catch (error) {
     console.error('Error fetching psychiatrist profile by ID:', error);

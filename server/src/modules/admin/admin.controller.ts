@@ -6,6 +6,11 @@ import {
   listPendingPsychiatristsForAdmin,
   reviewPsychiatrist,
 } from '../psychiatrist/psychiatrist.service.js';
+import {
+  getRevenueSummary,
+  listAllBookings,
+  listAllWalletTransactions,
+} from '../../controllers/booking.service.js';
 
 const reviewSchema = z.object({
   feedback: z.string().max(1000).optional(),
@@ -150,7 +155,25 @@ export const listAllPsychiatrists: RequestHandler = async (_req, res, next) => {
 
 export const getWallet: RequestHandler = async (_req, res, next) => {
   try {
-    // Stub until you add a Wallet/Transaction model
-    res.json({ balance: 0, transactions: [] });
+    const [revenue, transactions] = await Promise.all([
+      getRevenueSummary(),
+      listAllWalletTransactions({ limit: 100 }),
+    ]);
+    res.json({ revenue, transactions });
+  } catch (err) { next(err); }
+};
+
+export const getAdminRevenue: RequestHandler = async (_req, res, next) => {
+  try {
+    const summary = await getRevenueSummary();
+    res.json(summary);
+  } catch (err) { next(err); }
+};
+
+export const getAdminBookings: RequestHandler = async (req, res, next) => {
+  try {
+    const { payment_status } = req.query as { payment_status?: string };
+    const bookings = await listAllBookings({ payment_status, limit: 200 });
+    res.json({ bookings });
   } catch (err) { next(err); }
 };

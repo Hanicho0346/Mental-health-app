@@ -16,6 +16,7 @@ import chatRoutes from './routes/chatRoutes.js';
 import clerkRoutes from './modules/clerk/clerk.routes.js';
 import psychiatristRoutes from './modules/psychiatrist/psychiatrist.routes.js';
 import adminRoutes from './modules/admin/admin.routes.js';
+import bookingRoute from "./controllers/bookingRoute.js"
 export function createApp() {
   const app = express();
 
@@ -45,6 +46,13 @@ export function createApp() {
     res.json({ ok: true });
   });
 
+  // Chapa redirects here after payment — shows a simple page so the user can return to the app
+  app.get('/payment-return', (req, res) => {
+    const tx_ref = (req.query.trx_ref ?? req.query.tx_ref ?? '') as string;
+    res.setHeader('Content-Type', 'text/html');
+    res.send(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Payment Complete</title><style>body{font-family:sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f0fdf4;color:#111827}.card{background:#fff;border-radius:20px;padding:40px 32px;text-align:center;box-shadow:0 4px 24px rgba(0,0,0,.08);max-width:360px;width:90%}h1{color:#16a34a;font-size:24px;margin-bottom:8px}p{color:#6b7280;font-size:15px;line-height:1.6}.ref{font-size:12px;color:#9ca3af;margin-top:16px;word-break:break-all}</style></head><body><div class="card"><div style="font-size:52px">✅</div><h1>Payment Complete</h1><p>Your session has been booked. Return to the SelamMind app to continue.</p>${tx_ref ? `<p class="ref">Ref: ${tx_ref}</p>` : ''}</div></body></html>`);
+  });
+
    app.use('/api/auth/clerk', clerkRoutes);
   app.use('/api/auth', authRoutes);
  
@@ -53,6 +61,7 @@ export function createApp() {
   app.use('/api/config', configRoutes);
   app.use('/api/users', userRoutes);
   app.use('/api/messages', messageRoutes);
+  app.use('/api/bookings', bookingRoute);
   app.use('/api/appointments', appointmentRoutes);
  app.use('/api/doctor', doctorRoutes);
   app.use('/api/chat', chatRoutes);

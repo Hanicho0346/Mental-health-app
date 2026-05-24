@@ -1,7 +1,7 @@
 import { useUser } from "@clerk/clerk-expo";
 import { Feather, Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
-import React, { useEffect, useState } from "react";
+import { router, useFocusEffect } from "expo-router";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   FlatList,
   StyleSheet,
@@ -12,6 +12,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { getSocket } from "@/lib/socket";
 import { useChatStore } from "@/stores/chatStore";
+import { api } from "@/lib/api";
 
 const AVATAR_COLORS = ["#2563eb", "#7c3aed", "#db2777", "#d97706", "#059669"];
 
@@ -31,6 +32,21 @@ export default function UserChatsLobby() {
   const setPeer = useChatStore((s) => s.setPeer);
 
   const [connected, setConnected] = useState(true);
+  const [hasPaidBooking, setHasPaidBooking] = useState<boolean | null>(null);
+
+  // Check if user has any paid booking (access gate)
+  useFocusEffect(
+    useCallback(() => {
+      void (async () => {
+        try {
+          const { data } = await api.get<{ psychiatrists: { id: string }[] }>('/bookings/my-psychiatrists');
+          setHasPaidBooking((data.psychiatrists?.length ?? 0) > 0);
+        } catch {
+          setHasPaidBooking(false);
+        }
+      })();
+    }, [])
+  );
 
   useEffect(() => {
     const socket = getSocket();
@@ -91,6 +107,23 @@ export default function UserChatsLobby() {
         </View>
       </View>
 
+      {/* Booking access gate */}
+      {hasPaidBooking === false && (
+        <View style={styles.gateCard}>
+          <Feather name="lock" size={32} color="#D97706" />
+          <Text style={styles.gateTitle}>Book a Session First</Text>
+          <Text style={styles.gateSub}>
+            Pay ETB 300 to unlock chat access with a psychiatrist.
+          </Text>
+          <TouchableOpacity
+            style={styles.gateBtn}
+            onPress={() => router.push('/(tabs)/(user-tabs)/book')}
+          >
+            <Text style={styles.gateBtnTxt}>Book Now</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       <FlatList
         data={conversations}
         keyExtractor={(item) => item.peerUsername}
@@ -132,4 +165,9 @@ const styles = StyleSheet.create({
   emptyWrap: { alignItems: "center", marginTop: 100, padding: 20 },
   emptyTitle: { fontSize: 18, fontWeight: "600", color: "#374151", marginTop: 16 },
   emptySub: { fontSize: 14, color: "#6b7280", textAlign: "center", marginTop: 8 },
+  gateCard: { margin: 20, backgroundColor: '#FFFBEB', borderRadius: 20, padding: 24, alignItems: 'center', borderWidth: 1, borderColor: '#FDE68A' },
+  gateTitle: { fontSize: 18, fontWeight: '700', color: '#111827', marginTop: 12, marginBottom: 8 },
+  gateSub: { fontSize: 14, color: '#6B7280', textAlign: 'center', lineHeight: 22, marginBottom: 20 },
+  gateBtn: { backgroundColor: '#4ADE80', borderRadius: 12, paddingHorizontal: 28, paddingVertical: 13 },
+  gateBtnTxt: { fontSize: 15, fontWeight: '700', color: '#111827' },
 });
