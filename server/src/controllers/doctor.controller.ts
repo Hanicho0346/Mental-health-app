@@ -93,6 +93,19 @@ export async function getAppointmentsByDate(req: Request, res: Response): Promis
     });
   }
 }
+export async function getSupportVideos(req: Request, res: Response): Promise<void> {
+  try {
+    const videos = await doctorService.getSupportVideos();
+
+    res.status(200).json(videos);
+  } catch (err) {
+    console.error(err);
+
+    res.status(500).json({
+      message: 'Failed to fetch videos',
+    });
+  }
+}
 
 export async function getPatients(req: Request, res: Response): Promise<void> {
   try {

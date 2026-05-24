@@ -1,7 +1,7 @@
-import { io, Socket } from 'socket.io-client';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { useChatStore, ChatMessage, CallLog } from '@/stores/chatStore';
+import { initSocket, getSocket, disconnectSocket } from './socket';
 
 const CHAT_PORT = 4000;
 
@@ -22,20 +22,21 @@ function resolveChatServer(): string {
 
 export const CHAT_SERVER = resolveChatServer();
 
-let socket: Socket | null = null;
 let _me = '';
 let _peer = () => useChatStore.getState().peer;
 
-export function getSocket(): Socket | null {
-  return socket;
-}
-
-export function connectSocket(username: string): void {
+export function connectSocket(username: string, token?: string): void {
   _me = username;
+  const socket = initSocket();
   if (socket?.connected) return;
-  socket = io(CHAT_SERVER, { transports: ['websocket', 'polling'] });
+
+  // Set auth token if provided
+  if (token) {
+    socket.auth = { token };
+  }
 
   socket.on('connect', () => {
+    console.log('[Socket] Connected as:', username);
     socket!.emit('user-online', { username });
   });
 
@@ -44,7 +45,9 @@ export function connectSocket(username: string): void {
       const r = await fetch(`${CHAT_SERVER}/api/chat/users`);
       const users = await r.json();
       useChatStore.getState().setUsers(users);
-    } catch { /* ignore */ }
+    } catch (e) {
+      console.error('[Socket] Failed to load users:', e);
+    }
   });
 
   socket.on('receive-message', (msg: ChatMessage) => {
@@ -55,39 +58,46 @@ export function connectSocket(username: string): void {
       (msg.from === peer && msg.to === _me);
     if (involves) useChatStore.getState().appendMessage(msg);
   });
+
+  socket.on('connect_error', (err) => {
+    console.error('[Socket] Connection error:', err);
+  });
+
+  socket.on('disconnect', (reason) => {
+    console.log('[Socket] Disconnected:', reason);
+  });
+
+  socket.connect();
 }
 
-export function disconnectSocket(): void {
-  socket?.disconnect();
-  socket = null;
-}
+export { getSocket };
 
 export function emitSendMessage(from: string, to: string, content: string): void {
-  socket?.emit('send-message', { from, to, content });
+  getSocket()?.emit('send-message', { from, to, content });
 }
 
 export function emitSendVoice(from: string, to: string, fileUrl: string): void {
-  socket?.emit('send-voice', { from, to, fileUrl });
+  getSocket()?.emit('send-voice', { from, to, fileUrl });
 }
 
 export function emitCallUser(from: string, to: string): void {
-  socket?.emit('call-user', { from, to });
+  getSocket()?.emit('call-user', { from, to });
 }
 
 export function emitCallAccepted(from: string, to: string): void {
-  socket?.emit('call-accepted', { from, to });
+  getSocket()?.emit('call-accepted', { from, to });
 }
 
 export function emitCallDeclined(from: string, to: string): void {
-  socket?.emit('call-declined', { from, to });
+  getSocket()?.emit('call-declined', { from, to });
 }
 
 export function emitCallEnded(from: string, to: string, duration: number): void {
-  socket?.emit('call-ended', { from, to, duration });
+  getSocket()?.emit('call-ended', { from, to, duration });
 }
 
 export function emitSpSignal(to: string, signal: unknown): void {
-  socket?.emit('sp-signal', { to, signal });
+  getSocket()?.emit('sp-signal', { to, signal });
 }
 
 export async function apiLogin(

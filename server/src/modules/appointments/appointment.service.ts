@@ -26,7 +26,7 @@ export async function listPublicCounselors(): Promise<CounselorPublicDto[]> {
     role: "psychiatrist",
     verification_status: "approved",
   })
-    .select("full_name avatar_url specialty rating reviews")
+    .select("full_name avatar_url specialization")
     .lean()
     .limit(50)
     .exec();
@@ -35,13 +35,13 @@ export async function listPublicCounselors(): Promise<CounselorPublicDto[]> {
     id: u._id.toString(),
     full_name: u.full_name,
     full_name_am: "",
-    specialty: u.specialty || "Licensed psychiatrist",
+    specialty: u.specialization?.trim() || "Licensed psychiatrist",
     specialty_am: "",
     avatar_url:
       u.avatar_url?.trim() ||
       "https://images.unsplash.com/photo-1576091160399-112ba8d25d1d?w=150&h=150&fit=crop",
-    rating: u.rating ?? 0,
-    reviews: u.reviews ?? 0,
+    rating: 0,
+    reviews: 0,
   }));
 }
 

@@ -18,6 +18,14 @@ declare global {
         role: UserRole;
         emailVerified: boolean;
       };
+
+      /** Verified Clerk session — set by `requireClerkSession`. */
+      clerkSession?: {
+        clerkId: string;
+        email: string;
+        fullName: string;
+        profileImage: string;
+      };
     }
   }
 }

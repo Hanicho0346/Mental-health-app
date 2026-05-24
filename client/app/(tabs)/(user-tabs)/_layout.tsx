@@ -1,10 +1,11 @@
 import { HapticTab } from "@/components/haptic-tab";
+import { isAdmin } from "@/lib/authGuards";
 import { useAuthStore } from "@/stores/authStore";
 import { Feather } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Redirect, Tabs } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
-import { Platform, useWindowDimensions } from "react-native";
+import { ActivityIndicator, Platform, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function UserTabLayout() {
@@ -38,7 +39,11 @@ export default function UserTabLayout() {
         borderTopWidth: 1,
         borderTopColor: "#F3F4F6",
         ...(Platform.OS === "web"
-          ? { maxWidth: 720, alignSelf: "center" as const, width: "100%" as const }
+          ? {
+              maxWidth: 720,
+              alignSelf: "center" as const,
+              width: "100%" as const,
+            }
           : {}),
       },
       tabBarLabelStyle: {
@@ -56,7 +61,9 @@ export default function UserTabLayout() {
         if (!useAuthStore.getState().accessToken) {
           const legacy = await AsyncStorage.getItem("token");
           if (legacy) {
-            useAuthStore.getState().setSession({ accessToken: legacy, refreshToken: "" });
+            useAuthStore
+              .getState()
+              .setSession({ accessToken: legacy, refreshToken: "" });
           }
         }
         setReady(true);
@@ -67,9 +74,18 @@ export default function UserTabLayout() {
     return unsub;
   }, []);
 
-  if (!ready) return null;
+  if (!ready) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" />
+      </View>
+    );
+  }
+
   if (!accessToken) return <Redirect href="/login" />;
-  if (user?.role === "psychiatrist") return <Redirect href="/(tabs)/(psychiatrist-tabs)/dashboard" />;
+  if (isAdmin(user)) return <Redirect href="/(admin)" />;
+  if (user?.role === "psychiatrist")
+    return <Redirect href="/(tabs)/(psychiatrist-tabs)/dashboard" />;
 
   return (
     <Tabs screenOptions={screenOptions}>
@@ -77,28 +93,36 @@ export default function UserTabLayout() {
         name="home"
         options={{
           title: "Home",
-          tabBarIcon: ({ color }) => <Feather size={iconSize} name="home" color={color} />,
+          tabBarIcon: ({ color }) => (
+            <Feather size={iconSize} name="home" color={color} />
+          ),
         }}
       />
       <Tabs.Screen
         name="chats"
         options={{
           title: "Chats",
-          tabBarIcon: ({ color }) => <Feather size={iconSize} name="message-square" color={color} />,
+          tabBarIcon: ({ color }) => (
+            <Feather size={iconSize} name="message-square" color={color} />
+          ),
         }}
       />
       <Tabs.Screen
         name="book"
         options={{
           title: "Book",
-          tabBarIcon: ({ color }) => <Feather size={iconSize} name="calendar" color={color} />,
+          tabBarIcon: ({ color }) => (
+            <Feather size={iconSize} name="calendar" color={color} />
+          ),
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
           title: "Profile",
-          tabBarIcon: ({ color }) => <Feather size={iconSize} name="user" color={color} />,
+          tabBarIcon: ({ color }) => (
+            <Feather size={iconSize} name="user" color={color} />
+          ),
         }}
       />
     </Tabs>

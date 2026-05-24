@@ -83,3 +83,5 @@ export const requireAuth: RequestHandler = async (req, res, next) => {
     res.status(401).json({ error: 'Invalid or expired token' });
   }
 };
+/** Re-export unified auth (internal JWT + Clerk session). */
+

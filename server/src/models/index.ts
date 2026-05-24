@@ -4,6 +4,7 @@ import { RefreshSession } from './RefreshSession.js';
 import { User } from './User.js';
 import { Alert } from './alert.model.js';
 import { Video } from './video.model.js';
+import './WalletTransaction.js';
 
 const db = {
   Appointment,

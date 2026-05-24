@@ -13,6 +13,9 @@ export type AuthUser = {
   role?: string;
   email_verified?: boolean;
   verification_status?: string | null;
+  is_approved?: boolean;
+  admin_feedback?: string;
+  hospital_or_clinic?: string;
 };
 
 type AuthState = {
@@ -38,7 +41,7 @@ export const useAuthStore = create<AuthState>()(
       clearSession: async () => {
         set({ accessToken: null, refreshToken: null, user: null });
         await AsyncStorage.removeItem('token');
-        await AsyncStorage.removeItem('refresh_token');
+        await AsyncStorage.removeItem('refreshToken');
       },
     }),
     {
@@ -68,5 +71,9 @@ export function pickAuthUser(raw: Record<string, unknown>): AuthUser {
       raw.verification_status === null || raw.verification_status === undefined
         ? null
         : String(raw.verification_status),
+    is_approved: typeof raw.is_approved === 'boolean' ? raw.is_approved : undefined,
+    admin_feedback: raw.admin_feedback != null ? String(raw.admin_feedback) : undefined,
+    hospital_or_clinic:
+      raw.hospital_or_clinic != null ? String(raw.hospital_or_clinic) : undefined,
   };
 }

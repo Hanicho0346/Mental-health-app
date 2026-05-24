@@ -1,10 +1,13 @@
 import { HapticTab } from "@/components/haptic-tab";
+import { isRejectedPsychiatrist } from "@/lib/authGuards";
 import { useAuthStore } from "@/stores/authStore";
+import { useChatStore } from "@/stores/chatStore";
+import { connectSocket } from "@/lib/chatService";
 import { Feather } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Redirect, Tabs } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
-import { Platform, useWindowDimensions } from "react-native";
+import { ActivityIndicator, Platform, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function PsychiatristTabLayout() {
@@ -16,6 +19,15 @@ export default function PsychiatristTabLayout() {
 
   const compact = width < 380;
   const iconSize = compact ? 22 : 24;
+
+  useEffect(() => {
+    if (!user) return;
+
+    const username = user.full_name?.trim() || user.id;
+    useChatStore.getState().setMe({ userId: user.id, username });
+    const token = useAuthStore.getState().accessToken ?? undefined;
+    connectSocket(username, token);
+  }, [user]);
 
   const screenOptions = useMemo(() => {
     const bottomPad = Math.max(
@@ -38,7 +50,11 @@ export default function PsychiatristTabLayout() {
         borderTopWidth: 1,
         borderTopColor: "#F3F4F6",
         ...(Platform.OS === "web"
-          ? { maxWidth: 720, alignSelf: "center" as const, width: "100%" as const }
+          ? {
+              maxWidth: 720,
+              alignSelf: "center" as const,
+              width: "100%" as const,
+            }
           : {}),
       },
       tabBarLabelStyle: {
@@ -56,7 +72,9 @@ export default function PsychiatristTabLayout() {
         if (!useAuthStore.getState().accessToken) {
           const legacy = await AsyncStorage.getItem("token");
           if (legacy) {
-            useAuthStore.getState().setSession({ accessToken: legacy, refreshToken: "" });
+            useAuthStore
+              .getState()
+              .setSession({ accessToken: legacy, refreshToken: "" });
           }
         }
         setReady(true);
@@ -67,9 +85,20 @@ export default function PsychiatristTabLayout() {
     return unsub;
   }, []);
 
-  if (!ready) return null;
+  if (!ready) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" />
+      </View>
+    );
+  }
+
   if (!accessToken) return <Redirect href="/login" />;
-  if (user?.role !== "psychiatrist") return <Redirect href="/(tabs)/(user-tabs)/home" />;
+  if (user?.role !== "psychiatrist")
+    return <Redirect href="/(tabs)/(user-tabs)/home" />;
+  if (isRejectedPsychiatrist(user)) {
+    return <Redirect href="/psychiatrist-rejected" />;
+  }
 
   return (
     <Tabs screenOptions={screenOptions}>
@@ -77,35 +106,45 @@ export default function PsychiatristTabLayout() {
         name="dashboard"
         options={{
           title: "Dashboard",
-          tabBarIcon: ({ color }) => <Feather size={iconSize} name="grid" color={color} />,
+          tabBarIcon: ({ color }) => (
+            <Feather size={iconSize} name="grid" color={color} />
+          ),
         }}
       />
       <Tabs.Screen
         name="chats"
         options={{
           title: "Chats",
-          tabBarIcon: ({ color }) => <Feather size={iconSize} name="message-square" color={color} />,
+          tabBarIcon: ({ color }) => (
+            <Feather size={iconSize} name="message-square" color={color} />
+          ),
         }}
       />
       <Tabs.Screen
         name="users"
         options={{
           title: "Users",
-          tabBarIcon: ({ color }) => <Feather size={iconSize} name="users" color={color} />,
+          tabBarIcon: ({ color }) => (
+            <Feather size={iconSize} name="users" color={color} />
+          ),
         }}
       />
       <Tabs.Screen
         name="calender"
         options={{
           title: "Calendar",
-          tabBarIcon: ({ color }) => <Feather size={iconSize} name="calendar" color={color} />,
+          tabBarIcon: ({ color }) => (
+            <Feather size={iconSize} name="calendar" color={color} />
+          ),
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
           title: "Profile",
-          tabBarIcon: ({ color }) => <Feather size={iconSize} name="user" color={color} />,
+          tabBarIcon: ({ color }) => (
+            <Feather size={iconSize} name="user" color={color} />
+          ),
         }}
       />
     </Tabs>

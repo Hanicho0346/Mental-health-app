@@ -1,9 +1,6 @@
-import { getAuthToken } from "@/lib/auth";
-import { getDefaultTabRoute } from "@/lib/tabNavigation";
-import { useAuthStore } from "@/stores/authStore";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
-import React, { useEffect } from "react";
+import React from "react";
 import {
   Dimensions,
   Image,
@@ -18,35 +15,20 @@ const { height } = Dimensions.get('window');
   const WELCOME_IMAGE_URI = image;
 
 export default function WelcomeScreen() {
-  useEffect(() => {
-    void (async () => {
-      const token = await getAuthToken();
-      if (token) {
-        const user = useAuthStore.getState().user;
-        router.replace(getDefaultTabRoute(user));
-      }
-    })();
-  }, []);
-
   return (
     <View style={styles.container}>
-      {/* Top Image Section */}
       <View style={styles.imageContainer}>
- 
-
-<Image
-  source={WELCOME_IMAGE_URI}
-  style={styles.image}
-  resizeMode="cover"
-/>
-        {/* Gradient to fade the bottom of the image into the white background */}
+        <Image
+          source={WELCOME_IMAGE_URI}
+          style={styles.image}
+          resizeMode="cover"
+        />
         <LinearGradient
           colors={["transparent", "rgba(255,255,255,0.8)", "#FFFFFF"]}
           style={styles.gradient}
         />
       </View>
 
-      {/* Content Section */}
       <View style={styles.contentContainer}>
         <View style={styles.textCenter}>
           <Text style={styles.title}>You Are Not Alone</Text>

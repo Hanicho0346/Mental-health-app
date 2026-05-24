@@ -6,7 +6,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "tsx watch src/index.ts"
+    "dev": "tsx watch src/index.ts",
+    "seed:admin": "tsx scripts/seedAdmin.ts"
   },
   "dependencies": {
     "@clerk/backend": "^3.4.11",
@@ -37,7 +38,7 @@
     "@types/node": "^22.10.5",
     "@types/nodemailer": "^8.0.0",
     "@types/react": "~19.2.10",
-    "tsx": "^4.19.2",
+    "tsx": "^4.22.3",
     "typescript": "^5.7.3"
   }
 }

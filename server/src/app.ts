@@ -13,6 +13,9 @@ import messageRoutes from './routes/messageRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 import doctorRoutes from './routes/doctor.routes.js';
 import chatRoutes from './routes/chatRoutes.js';
+import clerkRoutes from './modules/clerk/clerk.routes.js';
+import psychiatristRoutes from './modules/psychiatrist/psychiatrist.routes.js';
+import adminRoutes from './modules/admin/admin.routes.js';
 export function createApp() {
   const app = express();
 
@@ -42,7 +45,11 @@ export function createApp() {
     res.json({ ok: true });
   });
 
+   app.use('/api/auth/clerk', clerkRoutes);
   app.use('/api/auth', authRoutes);
+ 
+  app.use('/api/psychiatrist', psychiatristRoutes);
+  app.use('/api/admin', adminRoutes);
   app.use('/api/config', configRoutes);
   app.use('/api/users', userRoutes);
   app.use('/api/messages', messageRoutes);

@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { useAuthStore } from '@/stores/authStore';
@@ -29,4 +30,25 @@ export async function clearAuthToken(): Promise<void> {
     /* best-effort */
   }
   await useAuthStore.getState().clearSession();
+}
+
+export function useAuthHydrated(): boolean {
+  const [hydrated, setHydrated] = useState(() => useAuthStore.persist.hasHydrated());
+
+  useEffect(() => {
+    if (useAuthStore.persist.hasHydrated()) {
+      setHydrated(true);
+      return;
+    }
+
+    const unsubscribe = useAuthStore.persist.onFinishHydration(() => {
+      setHydrated(true);
+    });
+
+    return () => {
+      unsubscribe?.();
+    };
+  }, []);
+
+  return hydrated;
 }

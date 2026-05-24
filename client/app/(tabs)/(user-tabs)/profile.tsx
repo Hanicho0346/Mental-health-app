@@ -4,6 +4,7 @@ import { getApiErrorMessage, logClientError } from '@/lib/log';
 import { Feather } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import React, { useCallback, useState } from 'react';
+import { useClerk } from "@clerk/clerk-expo";
 import {
   Alert,
   ScrollView,
@@ -64,16 +65,17 @@ export default function ProfileScreen() {
       };
     }, [])
   );
+const { signOut } = useClerk();
 
-  async function logout(): Promise<void> {
-    try {
-      await clearAuthToken();
-      router.replace('/');
-    } catch (e) {
-      logClientError('profile.logout', e);
-      Alert.alert('Logout failed', getApiErrorMessage(e));
-    }
+async function logout() {
+  try {
+    await signOut();
+    await clearAuthToken();
+    router.replace('/login');
+  } catch (e) {
+    Alert.alert('Logout failed', getApiErrorMessage(e));
   }
+}
 
   const joinLabel =
     me?.createdAt != null

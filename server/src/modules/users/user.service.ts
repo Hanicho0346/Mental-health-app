@@ -13,6 +13,9 @@ export type MeProfileDto = {
   role: string;
   email_verified: boolean;
   verification_status: string | null;
+  is_approved: boolean;
+  admin_feedback: string;
+  hospital_or_clinic: string;
 };
 
 export async function getMeProfile(userId: string): Promise<MeProfileDto> {
@@ -31,6 +34,11 @@ export async function getMeProfile(userId: string): Promise<MeProfileDto> {
     role: user.role ?? 'user',
     email_verified: user.email_verified ?? true,
     verification_status: user.verification_status ?? null,
+    is_approved:
+      user.is_approved ??
+      (user.role === 'psychiatrist' ? user.verification_status === 'approved' : true),
+    admin_feedback: user.admin_feedback ?? '',
+    hospital_or_clinic: user.hospital_or_clinic ?? '',
   };
 }
 
@@ -90,5 +98,10 @@ export async function patchMeProfile(
     role: user.role ?? 'user',
     email_verified: user.email_verified ?? true,
     verification_status: user.verification_status ?? null,
+    is_approved:
+      user.is_approved ??
+      (user.role === 'psychiatrist' ? user.verification_status === 'approved' : true),
+    admin_feedback: user.admin_feedback ?? '',
+    hospital_or_clinic: user.hospital_or_clinic ?? '',
   };
 }
