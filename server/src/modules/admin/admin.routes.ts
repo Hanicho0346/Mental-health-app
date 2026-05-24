@@ -9,7 +9,9 @@ import {
   getAdminStats,
   listAllUsers,
   getWallet,
-    listAllPsychiatrists,
+  getAdminRevenue,
+  getAdminBookings,
+  listAllPsychiatrists,
 } from './admin.controller.js';
 
 const router = Router();
@@ -18,7 +20,9 @@ router.use(requireAuth, requireRole('admin'));
 router.get('/stats',                       getAdminStats);
 router.get('/users',                       listAllUsers);
 router.get('/wallet',                      getWallet);
-router.get('/psychiatrists',           listAllPsychiatrists);
+router.get('/revenue',                     getAdminRevenue);
+router.get('/bookings',                    getAdminBookings);
+router.get('/psychiatrists',               listAllPsychiatrists);
 router.get('/psychiatrists/pending',       listPendingPsychiatrists);
 router.get('/psychiatrists/approved',      listApprovedPsychiatrists);
 router.post('/psychiatrists/:id/approve',  approvePsychiatrist);

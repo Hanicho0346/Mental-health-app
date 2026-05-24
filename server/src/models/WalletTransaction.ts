@@ -1,57 +1,59 @@
-import mongoose, { Schema, type InferSchemaType } from 'mongoose';
+import mongoose, { Schema, Document } from 'mongoose';
 
-const walletTransactionSchema = new Schema(
+export type TransactionType =
+  | 'session_earning'      // psychiatrist receives 70%
+  | 'platform_commission'  // admin receives 30%
+  | 'payment_received'     // user paid
+  | 'withdrawal'
+  | 'refund';
+
+export type TransactionStatus = 'pending' | 'completed' | 'failed' | 'cancelled';
+
+export interface IWalletTransaction extends Document {
+  user_id:           mongoose.Types.ObjectId;
+  booking_id?:       mongoose.Types.ObjectId;
+  amount:            number;
+  transaction_type:  TransactionType;
+  payment_reference: string;          // chapa tx_ref or internal ref
+  status:            TransactionStatus;
+  description:       string;
+  created_at:        Date;
+  updated_at:        Date;
+}
+
+const WalletTransactionSchema = new Schema<IWalletTransaction>(
   {
     user_id: {
       type: Schema.Types.ObjectId,
       ref: 'User',
       required: true,
-      index: true,
+    },
+    booking_id: {
+      type: Schema.Types.ObjectId,
+      ref: 'Booking',
+      required: false,
     },
     amount: {
       type: Number,
       required: true,
     },
-    type: {
+    transaction_type: {
       type: String,
-      enum: ['credit', 'debit'],
+      enum: ['session_earning', 'platform_commission', 'payment_received', 'withdrawal', 'refund'],
       required: true,
     },
-    category: {
+    payment_reference: {
       type: String,
-      enum: ['consultation', 'refund', 'admin_adjustment', 'withdrawal', 'deposit'],
       required: true,
     },
     status: {
       type: String,
       enum: ['pending', 'completed', 'failed', 'cancelled'],
-      default: 'pending',
+      default: 'completed',
     },
     description: {
       type: String,
       default: '',
-    },
-    reference_id: {
-      type: String,
-      unique: true,
-      sparse: true,
-    },
-    metadata: {
-      type: Map,
-      of: Schema.Types.Mixed,
-      default: {},
-    },
-    payment_method: {
-      type: String,
-      enum: ['stripe', 'paypal', 'bank_transfer', 'system'],
-      required: false,
-    },
-    payment_intent_id: {
-      type: String,
-      sparse: true,
-    },
-    completed_at: {
-      type: Date,
     },
   },
   {
@@ -59,14 +61,14 @@ const walletTransactionSchema = new Schema(
   }
 );
 
-// Indexes for faster queries
-walletTransactionSchema.index({ user_id: 1, created_at: -1 });
-walletTransactionSchema.index({ status: 1 });
-walletTransactionSchema.index({ reference_id: 1 });
-walletTransactionSchema.index({ payment_intent_id: 1 });
+// Indexes per spec
+WalletTransactionSchema.index({ payment_reference: 1 });
+WalletTransactionSchema.index({ booking_id: 1 });
+WalletTransactionSchema.index({ transaction_type: 1 });
+WalletTransactionSchema.index({ user_id: 1, created_at: -1 });
+WalletTransactionSchema.index({ status: 1 });
 
-export type WalletTransactionDocument = InferSchemaType<typeof walletTransactionSchema> & {
-  _id: mongoose.Types.ObjectId;
-};
-
-export const WalletTransaction = mongoose.model('WalletTransaction', walletTransactionSchema);
+export const WalletTransaction = mongoose.model<IWalletTransaction>(
+  'WalletTransaction',
+  WalletTransactionSchema
+);

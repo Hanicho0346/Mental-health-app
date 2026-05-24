@@ -7,6 +7,7 @@ import {
   createAppointment,
   listAssignedAppointments,
   listCounselors,
+  listAvailableSlots,
   listMyAppointments,
 } from './appointment.controller.js';
 
@@ -14,6 +15,7 @@ const router = Router();
 
 router.use(requireAuth);
 router.get('/counselors', listCounselors);
+router.get('/slots', listAvailableSlots); 
 router.get('/assigned', requireApprovedPsychiatrist, listAssignedAppointments);
 router.get('/', listMyAppointments);
 router.post('/', validateBody(bookAppointmentSchema), createAppointment);

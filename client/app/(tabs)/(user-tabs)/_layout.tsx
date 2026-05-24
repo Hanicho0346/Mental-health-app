@@ -5,7 +5,12 @@ import { Feather } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Redirect, Tabs } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Platform, useWindowDimensions, View } from "react-native";
+import {
+  ActivityIndicator,
+  Platform,
+  useWindowDimensions,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function UserTabLayout() {
@@ -76,7 +81,7 @@ export default function UserTabLayout() {
 
   if (!ready) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
         <ActivityIndicator size="large" />
       </View>
     );
@@ -114,6 +119,14 @@ export default function UserTabLayout() {
           tabBarIcon: ({ color }) => (
             <Feather size={iconSize} name="calendar" color={color} />
           ),
+        }}
+      />
+      <Tabs.Screen
+        name="payment-confirmation"
+        options={{
+          href: null,
+          headerShown: false,
+          tabBarStyle: { display: "none" }, // ← hides the tab bar on this screen
         }}
       />
       <Tabs.Screen
