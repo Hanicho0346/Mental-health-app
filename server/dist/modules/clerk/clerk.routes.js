@@ -1,0 +1,11 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const resolveAuth_js_1 = require("../../middleware/resolveAuth.js");
+const rateLimit_js_1 = require("../../middleware/rateLimit.js");
+const validateRequest_js_1 = require("../../middleware/validateRequest.js");
+const clerk_schemas_js_1 = require("./clerk.schemas.js");
+const clerk_controller_js_1 = require("./clerk.controller.js");
+const router = (0, express_1.Router)();
+router.post('/sync', (0, rateLimit_js_1.authRateLimiter)(), resolveAuth_js_1.requireClerkSession, (0, validateRequest_js_1.validateBody)(clerk_schemas_js_1.clerkSyncSchema), clerk_controller_js_1.clerkSync);
+exports.default = router;

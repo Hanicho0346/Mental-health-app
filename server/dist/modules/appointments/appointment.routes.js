@@ -1,0 +1,16 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const authenticate_js_1 = require("../../middleware/authenticate.js");
+const requireApprovedPsychiatrist_js_1 = require("../../middleware/requireApprovedPsychiatrist.js");
+const validateRequest_js_1 = require("../../middleware/validateRequest.js");
+const appointment_schemas_js_1 = require("../../validators/appointment.schemas.js");
+const appointment_controller_js_1 = require("./appointment.controller.js");
+const router = (0, express_1.Router)();
+router.use(authenticate_js_1.requireAuth);
+router.get('/counselors', appointment_controller_js_1.listCounselors);
+router.get('/slots', appointment_controller_js_1.listAvailableSlots);
+router.get('/assigned', requireApprovedPsychiatrist_js_1.requireApprovedPsychiatrist, appointment_controller_js_1.listAssignedAppointments);
+router.get('/', appointment_controller_js_1.listMyAppointments);
+router.post('/', (0, validateRequest_js_1.validateBody)(appointment_schemas_js_1.bookAppointmentSchema), appointment_controller_js_1.createAppointment);
+exports.default = router;
