@@ -59,7 +59,7 @@ export default function PsychiatristDirectChatScreen() {
         return;
       }
 
-      const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://192.168.137.250:4000';
+      const API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://mental-health-app-3pad.onrender.com';
       
       const response = await axios.get(
         `${API_URL}/api/messages`,
