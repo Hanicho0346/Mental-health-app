@@ -1,0 +1,18 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_controller_js_1 = require("./auth.controller.js");
+const rateLimit_js_1 = require("../../middleware/rateLimit.js");
+const validateRequest_js_1 = require("../../middleware/validateRequest.js");
+const auth_schemas_js_1 = require("../../validators/auth.schemas.js");
+const router = (0, express_1.Router)();
+const authLimiter = (0, rateLimit_js_1.authRateLimiter)();
+router.post('/register', authLimiter, (0, validateRequest_js_1.validateBody)(auth_schemas_js_1.registerSchema), auth_controller_js_1.register);
+router.post('/login', authLimiter, (0, validateRequest_js_1.validateBody)(auth_schemas_js_1.loginSchema), auth_controller_js_1.login);
+router.post('/refresh', authLimiter, (0, validateRequest_js_1.validateBody)(auth_schemas_js_1.refreshSchema), auth_controller_js_1.refresh);
+router.post('/logout', authLimiter, (0, validateRequest_js_1.validateBody)(auth_schemas_js_1.logoutSchema), auth_controller_js_1.logout);
+router.post('/verify-email', authLimiter, (0, validateRequest_js_1.validateBody)(auth_schemas_js_1.verifyEmailSchema), auth_controller_js_1.verifyEmail);
+router.post('/resend-verification', authLimiter, (0, validateRequest_js_1.validateBody)(auth_schemas_js_1.resendEmailSchema), auth_controller_js_1.resendVerification);
+router.post('/forgot-password', authLimiter, (0, validateRequest_js_1.validateBody)(auth_schemas_js_1.forgotPasswordSchema), auth_controller_js_1.forgotPassword);
+router.post('/reset-password', authLimiter, (0, validateRequest_js_1.validateBody)(auth_schemas_js_1.resetPasswordSchema), auth_controller_js_1.resetPassword);
+exports.default = router;

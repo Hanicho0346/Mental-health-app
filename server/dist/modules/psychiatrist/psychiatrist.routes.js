@@ -1,0 +1,18 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const authenticate_js_1 = require("../../middleware/authenticate.js");
+const authorize_js_1 = require("../../middleware/authorize.js");
+const validateRequest_js_1 = require("../../middleware/validateRequest.js");
+const multer_config_js_1 = require("../../modules/uploads/multer.config.js");
+const psychiatrist_schemas_js_1 = require("../../validators/psychiatrist.schemas.js");
+const psychiatrist_controller_js_1 = require("./psychiatrist.controller.js");
+const router = (0, express_1.Router)();
+router.use(authenticate_js_1.requireAuth, (0, authorize_js_1.requireRole)('psychiatrist'));
+router.get('/verification/status', psychiatrist_controller_js_1.getVerificationStatus);
+router.get('/profile', psychiatrist_controller_js_1.getFullProfile);
+router.get('/wallet', psychiatrist_controller_js_1.getPsychiatristWallet);
+router.get('/wallet/transactions', psychiatrist_controller_js_1.getPsychiatristTransactions);
+router.post('/verification/submit', (0, validateRequest_js_1.validateBody)(psychiatrist_schemas_js_1.psychiatristProfileUpdateSchema), psychiatrist_controller_js_1.submitVerification);
+router.post('/verification/documents', multer_config_js_1.memoryUpload.single('document'), (0, validateRequest_js_1.validateBody)(psychiatrist_schemas_js_1.psychiatristVerificationSchema), psychiatrist_controller_js_1.uploadDocument);
+exports.default = router;

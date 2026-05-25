@@ -1,0 +1,11 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const authenticate_js_1 = require("../../middleware/authenticate.js");
+const user_controller_js_1 = require("./user.controller.js");
+const router = (0, express_1.Router)();
+router.use(authenticate_js_1.requireAuth);
+router.get('/me', user_controller_js_1.getMe);
+router.patch('/me', user_controller_js_1.patchMe);
+router.get('/peer/:peerId', user_controller_js_1.getPeerPublic);
+exports.default = router;
