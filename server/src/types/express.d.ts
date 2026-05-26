@@ -8,6 +8,7 @@ declare global {
        * Set by `requireAuth`. Present on routes mounted after that middleware.
        */
       userId?: string;
+      clerkId?:string;
 
       /** Set by `requireAuth` alongside `userId`. */
       userObjectId?: Types.ObjectId;
