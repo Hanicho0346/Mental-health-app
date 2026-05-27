@@ -1,5 +1,5 @@
 import { Feather, Ionicons } from "@expo/vector-icons";
-import { useClerk, useSignUp } from "@clerk/clerk-expo";
+import { useAuth, useSignUp } from "@clerk/clerk-expo";
 import { router } from "expo-router";
 import React, { useState } from "react";
 import {
@@ -20,7 +20,7 @@ type Step = 1 | 2 | 3;
 
 export default function RegisterScreen() {
   const { signUp, setActive, isLoaded } = useSignUp();
-  const { session } = useClerk(); // ✅ Access live session after setActive resolves
+  // const { session } = useClerk(); // ✅ Access live session after setActive resolves
 
   const [step, setStep] = useState<Step>(1);
   const [role, setRole] = useState<Role>(null);
@@ -30,7 +30,7 @@ export default function RegisterScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [otp, setOtp] = useState("");
   const [submitting, setSubmitting] = useState(false);
-
+const { sessionId, getToken } = useAuth();
   // Psychiatrist fields
   const [nationalId, setNationalId] = useState("");
   const [licenseNumber, setLicenseNumber] = useState("");
@@ -73,105 +73,138 @@ export default function RegisterScreen() {
     }
   }
 
-  async function handleVerifyOtp(): Promise<void> {
-    if (!isLoaded || submitting) return;
-    if (!otp.trim()) {
-      Alert.alert("Enter code", "Please enter the verification code.");
+ async function handleVerifyOtp(): Promise<void> {
+  if (!isLoaded || submitting) return;
+
+  if (!otp.trim()) {
+    Alert.alert(
+      "Enter code",
+      "Please enter the verification code."
+    );
+    return;
+  }
+
+  setSubmitting(true);
+
+  try {
+    // 1. Verify OTP
+    const result = await signUp?.attemptEmailAddressVerification({
+      code: otp.trim(),
+    });
+
+    if (
+      result?.status !== "complete" ||
+      !result.createdSessionId
+    ) {
+      Alert.alert(
+        "Verification failed",
+        "Invalid verification code."
+      );
       return;
     }
 
-    setSubmitting(true);
-    try {
-      // Step 1: Verify OTP
-      const result = await signUp?.attemptEmailAddressVerification({
-        code: otp.trim(),
-      });
+    // 2. Activate Clerk session
+    await setActive({
+  session: result.createdSessionId,
+});
 
-      if (result?.status !== "complete" || !result.createdSessionId) {
-        Alert.alert(
-          "Verification incomplete",
-          "Please enter the correct code or resend it.",
-        );
-        return;
-      }
+console.log("SESSION ACTIVATED");
 
-      // Step 2: Activate session — after this, useClerk().session is populated
-      await setActive({ session: result.createdSessionId });
+// wait for Clerk auth to refresh
+await new Promise(resolve => setTimeout(resolve, 1500));
 
-      // Step 3: Get token — session is now live after setActive resolves
-      // Small wait to ensure Clerk's internal state has propagated
-      await new Promise((resolve) => setTimeout(resolve, 300));
+let token: string | null = null;
 
-      let token: string | null = null;
+try {
+  token = await getToken({
+    template: "backend",
+  });
 
-      // Try the session object directly from useClerk() — it's reactive
-      if (session) {
-        try {
-          token = await session.getToken({ template: "backend" });
-        } catch {
-          token = await session.getToken();
-        }
-      }
+  console.log("BACKEND TOKEN:", token);
+} catch (err) {
+  console.log("Backend token failed:", err);
+}
 
-      // Fallback: try via signUp client
-      if (!token) {
-        const activeSessions = signUp?.client?.activeSessions ?? [];
-        const activeSession =
-          activeSessions.find((s) => s.id === result.createdSessionId) ??
-          activeSessions[0];
-        if (activeSession) {
-          try {
-            token = await activeSession.getToken({ template: "backend" });
-          } catch {
-            token = await activeSession.getToken();
-          }
-        }
-      }
+if (!token) {
+  try {
+    token = await getToken();
 
-      if (!token) {
-        Alert.alert(
-          "Session error",
-          "Could not obtain session token. Please log in.",
-        );
-        router.replace("/login");
-        return;
-      }
-
-      // Step 4: Build role payload
-      const payload =
-        role === "psychiatrist"
-          ? {
-              role: "psychiatrist" as const,
-              national_id: nationalId.trim(),
-              medical_license: licenseNumber.trim(),
-              specialization: specialization.trim(),
-              experience_years: parseInt(experience, 10) || 0,
-            }
-          : { role: "user" as const };
-
-      // Step 5: Sync with backend
-      const { syncClerkWithBackend } = await import("@/lib/clerkBackendSync");
-      const syncResult = await syncClerkWithBackend(token, payload);
-
-      if (!syncResult.user) {
-        Alert.alert(
-          "Account sync failed",
-          "Your account was created but could not sync. Please login.",
-        );
-        router.replace("/login");
-        return;
-      }
-
-      // Step 6: Navigate
-      router.replace(resolvePostAuthRoute(syncResult.user));
-    } catch (e: any) {
-      const msg = e?.errors?.[0]?.longMessage ?? e?.message ?? "Invalid code";
-      console.error("[register] OTP verification error:", e);
-      Alert.alert("Verification failed", msg);
-    } finally {
-      setSubmitting(false);
-    }
+    console.log("DEFAULT TOKEN:", token);
+  } catch (err) {
+    console.log("Default token failed:", err);
   }
+}
+
+if (!token) {
+  Alert.alert(
+    "Session error",
+    "Could not obtain session token. Please login."
+  );
+
+  router.replace("/login");
+  return;
+}
+
+    console.log("TOKEN OK");
+
+    // 6. Build backend payload
+    const payload =
+      role === "psychiatrist"
+        ? {
+            role: "psychiatrist" as const,
+            national_id: nationalId.trim(),
+            medical_license: licenseNumber.trim(),
+            specialization: specialization.trim(),
+            experience_years:
+              parseInt(experience, 10) || 0,
+          }
+        : {
+            role: "user" as const,
+          };
+
+    // 7. Sync with backend
+    const { syncClerkWithBackend } =
+      await import("@/lib/clerkBackendSync");
+
+    const syncResult =
+      await syncClerkWithBackend(
+        token,
+        payload
+      );
+
+    console.log("SYNC RESULT:", syncResult);
+
+    if (!syncResult?.user) {
+      Alert.alert(
+        "Sync failed",
+        "Could not sync account."
+      );
+
+      router.replace("/login");
+      return;
+    }
+
+    // 8. Navigate
+    router.replace(
+      resolvePostAuthRoute(syncResult.user)
+    );
+
+  } catch (e: any) {
+    console.error("VERIFY ERROR:", e);
+
+    const msg =
+      e?.errors?.[0]?.longMessage ||
+      e?.message ||
+      "Verification failed";
+
+    Alert.alert(
+      "Verification failed",
+      msg
+    );
+  } finally {
+    setSubmitting(false);
+  }
+}
 
   // ── Step 1: Role selection ──────────────────────────────────────────────
   if (step === 1) {

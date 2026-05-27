@@ -11,11 +11,12 @@ import { User } from '../../models/User.js';
 
 export const getVerificationStatus: RequestHandler = async (req, res, next) => {
   try {
+    
     if (!req.userId) {
       res.status(401).json({ error: 'Unauthorized' });
       return;
     }
-    const status = await getPsychiatristVerificationStatus(req.userId);
+    const status = await getPsychiatristVerificationStatus(req.userObjectId.toString());
     res.json(status);
   } catch (err) {
     next(err);
@@ -126,18 +127,10 @@ export const getPsychiatristWallet = async (
   res: Response
 ): Promise<void> => {
   try {
-    const clerkId = req.userId;
+   const userId = req.userObjectId;
 
-    if (!clerkId) {
-      res.status(401).json({
-        error: 'Unauthorized',
-      });
-      return;
-    }
 
-    const user = await User.findOne({
-      clerk_id: clerkId,
-    });
+   const user = await User.findById(userId);
 
     if (!user) {
       res.status(404).json({
@@ -210,18 +203,9 @@ export const getPsychiatristTransactions = async (
   res: Response
 ): Promise<void> => {
   try {
-    const clerkId = req.userId;
+   const userId = req.userObjectId;
+   const user = await User.findById(userId);
 
-    if (!clerkId) {
-      res.status(401).json({
-        error: 'Unauthorized',
-      });
-      return;
-    }
-
-    const user = await User.findOne({
-      clerk_id: clerkId,
-    });
 
     if (!user) {
       res.status(404).json({
