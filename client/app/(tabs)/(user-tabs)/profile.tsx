@@ -7,12 +7,15 @@ import React, { useCallback, useState } from "react";
 import { useClerk } from "@clerk/clerk-expo";
 import {
   Alert,
+  Modal,
   ScrollView,
   StyleSheet,
   Switch,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
+  ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, {
@@ -22,6 +25,10 @@ import Svg, {
   Stop,
 } from "react-native-svg";
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type SubscriptionTier = "free" | "premier" | "student";
+
 type MeResponse = {
   id: string;
   full_name: string;
@@ -30,6 +37,12 @@ type MeResponse = {
   avatar_url?: string;
   mood_status?: string;
   createdAt?: string;
+  subscription_tier: SubscriptionTier;
+  is_premier: boolean;
+  premier_expires_at?: string;
+  ai_chats_used_today?: number;
+  ai_chats_daily_limit?: number; // null = unlimited for premier
+  streak_days?: number;
 };
 
 type AppointmentDto = {
@@ -60,6 +73,8 @@ type WalletData = {
   balance: number;
   transactions: WalletTx[];
 };
+
+// ─── Constants ────────────────────────────────────────────────────────────────
 
 const TYPE_META: Record<
   TransactionType,
@@ -102,6 +117,30 @@ const TYPE_META: Record<
   },
 };
 
+const TIER_META: Record<
+  SubscriptionTier,
+  { label: string; color: string; bg: string; icon: string }
+> = {
+  free: {
+    label: "Free",
+    color: "#6B7280",
+    bg: "#F3F4F6",
+    icon: "user",
+  },
+  premier: {
+    label: "Premier",
+    color: "#B45309",
+    bg: "#FEF3C7",
+    icon: "star",
+  },
+  student: {
+    label: "Student",
+    color: "#1D4ED8",
+    bg: "#DBEAFE",
+    icon: "book-open",
+  },
+};
+
 function fmtDate(iso: string): string {
   try {
     return new Date(iso).toLocaleDateString(undefined, {
@@ -114,41 +153,366 @@ function fmtDate(iso: string): string {
   }
 }
 
+// ─── Upgrade Modal ────────────────────────────────────────────────────────────
+
+type UpgradeModalProps = {
+  visible: boolean;
+  onClose: () => void;
+  onSuccess: () => void;
+};
+
+function UpgradeModal({ visible, onClose, onSuccess }: UpgradeModalProps) {
+  const [tab, setTab] = useState<"premier" | "student">("premier");
+  const [studentId, setStudentId] = useState("");
+  const [studentEmail, setStudentEmail] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function handlePremierSubscribe() {
+    setLoading(true);
+    try {
+      await api.post("/subscriptions/premier");
+      Alert.alert("🎉 Welcome to Premier!", "You now have full access.");
+      onSuccess();
+      onClose();
+    } catch (e) {
+      Alert.alert("Subscription failed", getApiErrorMessage(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleStudentVerify() {
+    if (!studentId.trim() && !studentEmail.trim()) {
+      Alert.alert("Required", "Please enter your student ID or .edu email.");
+      return;
+    }
+    setLoading(true);
+    try {
+      await api.post("/subscriptions/student-verify", {
+        student_id: studentId.trim() || undefined,
+        student_email: studentEmail.trim() || undefined,
+      });
+      Alert.alert(
+        "✅ Student Verified!",
+        "Your student discount has been applied."
+      );
+      onSuccess();
+      onClose();
+    } catch (e) {
+      Alert.alert("Verification failed", getApiErrorMessage(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <Modal
+      visible={visible}
+      animationType="slide"
+      transparent
+      onRequestClose={onClose}
+    >
+      <View style={modalStyles.overlay}>
+        <View style={modalStyles.sheet}>
+          {/* Header */}
+          <View style={modalStyles.sheetHeader}>
+            <Text style={modalStyles.sheetTitle}>Unlock Premier Access</Text>
+            <TouchableOpacity onPress={onClose}>
+              <Feather name="x" size={22} color="#6B7280" />
+            </TouchableOpacity>
+          </View>
+          <Text style={modalStyles.sheetSubtitle}>
+            Choose how you'd like to upgrade
+          </Text>
+
+          {/* Tabs */}
+          <View style={modalStyles.tabs}>
+            <TouchableOpacity
+              style={[modalStyles.tab, tab === "premier" && modalStyles.tabActive]}
+              onPress={() => setTab("premier")}
+            >
+              <Feather
+                name="star"
+                size={14}
+                color={tab === "premier" ? "#B45309" : "#9CA3AF"}
+              />
+              <Text
+                style={[
+                  modalStyles.tabText,
+                  tab === "premier" && modalStyles.tabTextActive,
+                ]}
+              >
+                Premier
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[modalStyles.tab, tab === "student" && modalStyles.tabActive]}
+              onPress={() => setTab("student")}
+            >
+              <Feather
+                name="book-open"
+                size={14}
+                color={tab === "student" ? "#1D4ED8" : "#9CA3AF"}
+              />
+              <Text
+                style={[
+                  modalStyles.tabText,
+                  tab === "student" && modalStyles.tabTextActiveBlue,
+                ]}
+              >
+                Student Discount
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Benefits list */}
+          <View style={modalStyles.benefits}>
+            {[
+              { icon: "message-circle", text: "Unlimited free AI chat sessions" },
+              { icon: "zap", text: "Daily streak tracking & rewards" },
+              { icon: "users", text: "Access to group chats & community" },
+            ].map((b) => (
+              <View key={b.text} style={modalStyles.benefitRow}>
+                <View style={modalStyles.benefitIcon}>
+                  <Feather name={b.icon as any} size={15} color="#16A34A" />
+                </View>
+                <Text style={modalStyles.benefitText}>{b.text}</Text>
+              </View>
+            ))}
+          </View>
+
+          {/* Tab content */}
+          {tab === "premier" ? (
+            <View>
+              <View style={modalStyles.priceBox}>
+                <Text style={modalStyles.price}>ETB 199</Text>
+                <Text style={modalStyles.pricePer}>/month</Text>
+              </View>
+              <TouchableOpacity
+                style={[modalStyles.ctaBtn, { backgroundColor: "#B45309" }]}
+                onPress={handlePremierSubscribe}
+                disabled={loading}
+              >
+                {loading ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={modalStyles.ctaBtnText}>
+                    Subscribe to Premier
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View>
+              <Text style={modalStyles.inputLabel}>Student ID</Text>
+              <TextInput
+                style={modalStyles.input}
+                placeholder="e.g. STU-2024-001"
+                value={studentId}
+                onChangeText={setStudentId}
+                placeholderTextColor="#9CA3AF"
+              />
+              <Text style={modalStyles.inputLabel}>
+                Or .edu / University Email
+              </Text>
+              <TextInput
+                style={modalStyles.input}
+                placeholder="you@university.edu.et"
+                value={studentEmail}
+                onChangeText={setStudentEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                placeholderTextColor="#9CA3AF"
+              />
+              <TouchableOpacity
+                style={[modalStyles.ctaBtn, { backgroundColor: "#1D4ED8" }]}
+                onPress={handleStudentVerify}
+                disabled={loading}
+              >
+                {loading ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={modalStyles.ctaBtnText}>
+                    Verify Student Status
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+// ─── Premier Benefits Card ────────────────────────────────────────────────────
+
+type PremierCardProps = {
+  tier: SubscriptionTier;
+  isPremier: boolean;
+  aiChatsUsedToday: number;
+  aiChatsDailyLimit: number | null;
+  streakDays: number;
+  onUpgrade: () => void;
+};
+
+function PremierCard({
+  tier,
+  isPremier,
+  aiChatsUsedToday,
+  aiChatsDailyLimit,
+  streakDays,
+  onUpgrade,
+}: PremierCardProps) {
+  if (!isPremier) {
+    // Show upgrade CTA for free users
+    return (
+      <View style={premierStyles.upgradeCard}>
+        <View style={premierStyles.upgradeLeft}>
+          <View style={premierStyles.upgradeIconWrap}>
+            <Feather name="star" size={20} color="#B45309" />
+          </View>
+          <View>
+            <Text style={premierStyles.upgradeTitle}>
+              Unlock Premier Access
+            </Text>
+            <Text style={premierStyles.upgradeSubtitle}>
+              AI chat · Streaks · Group chats
+            </Text>
+          </View>
+        </View>
+        <TouchableOpacity style={premierStyles.upgradeBtn} onPress={onUpgrade}>
+          <Text style={premierStyles.upgradeBtnText}>Upgrade</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  const chatProgress =
+    aiChatsDailyLimit != null
+      ? Math.min(aiChatsUsedToday / aiChatsDailyLimit, 1)
+      : 0;
+
+  return (
+    <View style={premierStyles.card}>
+      {/* Tier badge */}
+      <View style={premierStyles.cardHeader}>
+        <View
+          style={[
+            premierStyles.tierBadge,
+            { backgroundColor: TIER_META[tier].bg },
+          ]}
+        >
+          <Feather
+            name={TIER_META[tier].icon as any}
+            size={13}
+            color={TIER_META[tier].color}
+          />
+          <Text style={[premierStyles.tierLabel, { color: TIER_META[tier].color }]}>
+            {TIER_META[tier].label.toUpperCase()}
+          </Text>
+        </View>
+        <Text style={premierStyles.cardTitle}>Your Benefits</Text>
+      </View>
+
+      {/* 3 benefit pills */}
+      <View style={premierStyles.pillRow}>
+        {/* AI Chat */}
+        <TouchableOpacity
+          style={premierStyles.pill}
+          onPress={() => router.push("/ai-chat")}
+        >
+          <View style={[premierStyles.pillIcon, { backgroundColor: "#F0FDF4" }]}>
+            <Feather name="message-circle" size={16} color="#16A34A" />
+          </View>
+          <Text style={premierStyles.pillLabel}>AI Chat</Text>
+          <Text style={premierStyles.pillSub}>
+            {aiChatsDailyLimit == null
+              ? "Unlimited"
+              : `${aiChatsUsedToday}/${aiChatsDailyLimit} today`}
+          </Text>
+          {aiChatsDailyLimit != null && (
+            <View style={premierStyles.progressTrack}>
+              <View
+                style={[
+                  premierStyles.progressFill,
+                  { width: `${chatProgress * 100}%` },
+                ]}
+              />
+            </View>
+          )}
+        </TouchableOpacity>
+
+        {/* Daily Streak */}
+        <TouchableOpacity
+          style={premierStyles.pill}
+          onPress={() => router.push("/streak")}
+        >
+          <View style={[premierStyles.pillIcon, { backgroundColor: "#FFF7ED" }]}>
+            <Feather name="zap" size={16} color="#F59E0B" />
+          </View>
+          <Text style={premierStyles.pillLabel}>Streak</Text>
+          <Text style={[premierStyles.pillSub, { color: "#F59E0B", fontWeight: "800" }]}>
+            {streakDays} days 🔥
+          </Text>
+        </TouchableOpacity>
+
+        {/* Group Chats */}
+        <TouchableOpacity
+          style={premierStyles.pill}
+          onPress={() => router.push("/group-chats")}
+        >
+          <View style={[premierStyles.pillIcon, { backgroundColor: "#EDE9FE" }]}>
+            <Feather name="users" size={16} color="#7C3AED" />
+          </View>
+          <Text style={premierStyles.pillLabel}>Groups</Text>
+          <Text style={premierStyles.pillSub}>Join nearby</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+// ─── Main Screen ──────────────────────────────────────────────────────────────
+
 export default function ProfileScreen() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [me, setMe] = useState<MeResponse | null>(null);
   const [appointments, setAppointments] = useState<AppointmentDto[]>([]);
   const [wallet, setWallet] = useState<WalletData | null>(null);
-  const [showWallet, setShowWallet] = useState(false);
+  const [upgradeVisible, setUpgradeVisible] = useState(false);
+
+  async function loadData(cancelled: { value: boolean }) {
+    try {
+      const [meRes, apptRes, walletRes] = await Promise.all([
+        api.get<MeResponse>("/users/me"),
+        api.get<AppointmentDto[]>("/appointments"),
+        api.get<WalletData>("/bookings/wallet"),
+      ]);
+      if (!cancelled.value) {
+        setMe(meRes.data);
+        setAppointments(apptRes.data);
+        setWallet(walletRes.data);
+      }
+    } catch (e) {
+      logClientError("profile.load", e);
+      if (!cancelled.value) {
+        setMe(null);
+        setAppointments([]);
+        setWallet(null);
+        Alert.alert("Could not load profile", getApiErrorMessage(e));
+      }
+    }
+  }
+
   useFocusEffect(
     useCallback(() => {
-      let cancelled = false;
-      void (async () => {
-        try {
-          const [meRes, apptRes, walletRes] = await Promise.all([
-            api.get<MeResponse>("/users/me"),
-            api.get<AppointmentDto[]>("/appointments"),
-            api.get<WalletData>("/bookings/wallet"),
-          ]);
-          if (!cancelled) {
-            setMe(meRes.data);
-            setAppointments(apptRes.data);
-            setWallet(walletRes.data);
-          }
-        } catch (e) {
-          logClientError("profile.load", e);
-          if (!cancelled) {
-            setMe(null);
-            setAppointments([]);
-            setWallet(null);
-            Alert.alert("Could not load profile", getApiErrorMessage(e));
-          }
-        }
-      })();
+      const cancelled = { value: false };
+      void loadData(cancelled);
       return () => {
-        cancelled = true;
+        cancelled.value = true;
       };
-    }, []),
+    }, [])
   );
 
   const { signOut } = useClerk();
@@ -163,9 +527,18 @@ export default function ProfileScreen() {
     }
   }
 
+  const tier: SubscriptionTier = me?.subscription_tier ?? "free";
+  const isPremier = me?.is_premier ?? false;
+  const streakDays = me?.streak_days ?? 0;
+  const aiChatsUsedToday = me?.ai_chats_used_today ?? 0;
+  const aiChatsDailyLimit = me?.ai_chats_daily_limit ?? null;
+
   const joinLabel =
     me?.createdAt != null
-      ? `Joined ${new Date(me.createdAt).toLocaleDateString(undefined, { month: "long", year: "numeric" })}`
+      ? `Joined ${new Date(me.createdAt).toLocaleDateString(undefined, {
+          month: "long",
+          year: "numeric",
+        })}`
       : "Joined";
 
   const statusLine =
@@ -173,7 +546,6 @@ export default function ProfileScreen() {
       ? `${me.mood_status.trim()} / የተረጋጋ`
       : "Feeling Calm / የተረጋጋ";
 
-  // Show only the 3 most recent transactions as a preview
   const recentTxs = (wallet?.transactions ?? []).slice(0, 3);
 
   return (
@@ -196,13 +568,65 @@ export default function ProfileScreen() {
             <View style={styles.avatarCircle} />
             <View style={styles.activeDot} />
           </View>
-          <Text style={styles.userName}>{me?.full_name ?? "—"}</Text>
+          <View style={styles.heroNameRow}>
+            <Text style={styles.userName}>{me?.full_name ?? "—"}</Text>
+            {isPremier && (
+              <View
+                style={[
+                  styles.heroBadge,
+                  { backgroundColor: TIER_META[tier].bg },
+                ]}
+              >
+                <Feather
+                  name={TIER_META[tier].icon as any}
+                  size={11}
+                  color={TIER_META[tier].color}
+                />
+                <Text
+                  style={[styles.heroBadgeText, { color: TIER_META[tier].color }]}
+                >
+                  {TIER_META[tier].label}
+                </Text>
+              </View>
+            )}
+          </View>
           <Text style={styles.joinDate}>{joinLabel}</Text>
           <View style={styles.statusBadge}>
             <View style={styles.statusDot} />
             <Text style={styles.statusText}>{statusLine}</Text>
           </View>
         </View>
+
+        {/* ── PREMIER / UPGRADE SECTION ── */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>
+            {isPremier ? (
+              <>
+                MY PLAN{" "}
+                <Text style={styles.amharicSectionTitle}>/ የደንበኝነት ዕቅድ</Text>
+              </>
+            ) : (
+              <>
+                UPGRADE{" "}
+                <Text style={styles.amharicSectionTitle}>/ ያሻሽሉ</Text>
+              </>
+            )}
+          </Text>
+          <Text style={styles.sectionSubtitle}>
+            {isPremier
+              ? "Your unlocked features"
+              : "Get AI chat, streaks & group access"}
+          </Text>
+        </View>
+
+        <PremierCard
+          tier={tier}
+          isPremier={isPremier}
+          aiChatsUsedToday={aiChatsUsedToday}
+          aiChatsDailyLimit={aiChatsDailyLimit}
+          streakDays={streakDays}
+          onUpgrade={() => setUpgradeVisible(true)}
+        />
 
         {/* MENTAL GROWTH SECTION */}
         <View style={styles.sectionHeader}>
@@ -232,7 +656,7 @@ export default function ProfileScreen() {
                   STREAK
                 </Text>
               </View>
-              <Text style={styles.statValue}>5</Text>
+              <Text style={styles.statValue}>{streakDays}</Text>
               <Text style={styles.statSubText}>Days in a row</Text>
             </View>
           </View>
@@ -278,7 +702,7 @@ export default function ProfileScreen() {
           </View>
         </View>
 
-        {/* ── WALLET SECTION ── */}
+        {/* WALLET SECTION */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>
             MY WALLET <Text style={styles.amharicSectionTitle}>/ ዋሌት</Text>
@@ -287,7 +711,6 @@ export default function ProfileScreen() {
         </View>
 
         <View style={styles.walletCard}>
-          {/* Balance banner */}
           <View style={styles.walletBanner}>
             <View>
               <Text style={styles.walletBannerLabel}>Available Balance</Text>
@@ -300,7 +723,6 @@ export default function ProfileScreen() {
             </View>
           </View>
 
-          {/* Recent transactions preview */}
           {recentTxs.length > 0 ? (
             <>
               <Text style={styles.walletTxHeading}>Recent Transactions</Text>
@@ -330,7 +752,10 @@ export default function ProfileScreen() {
                       <Text
                         style={[
                           styles.txAmount,
-                          { color: meta.sign === "+" ? "#16A34A" : "#EF4444" },
+                          {
+                            color:
+                              meta.sign === "+" ? "#16A34A" : "#EF4444",
+                          },
                         ]}
                       >
                         {meta.sign}ETB {item.amount}
@@ -371,7 +796,8 @@ export default function ProfileScreen() {
             </View>
             <View style={styles.rowTextContainer}>
               <Text style={styles.rowTitle}>
-                Email Address <Text style={styles.amharicRowTitle}>/ ኢሜል</Text>
+                Email Address{" "}
+                <Text style={styles.amharicRowTitle}>/ ኢሜል</Text>
               </Text>
               <Text style={styles.rowValue}>{me?.email ?? "—"}</Text>
             </View>
@@ -386,7 +812,8 @@ export default function ProfileScreen() {
             </View>
             <View style={styles.rowTextContainer}>
               <Text style={styles.rowTitle}>
-                National ID <Text style={styles.amharicRowTitle}>/ መታወቂያ</Text>
+                National ID{" "}
+                <Text style={styles.amharicRowTitle}>/ መታወቂያ</Text>
               </Text>
               <Text style={styles.rowValue}>{me?.national_id ?? "—"}</Text>
             </View>
@@ -417,7 +844,8 @@ export default function ProfileScreen() {
         {/* PREFERENCES SECTION */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>
-            PREFERENCES <Text style={styles.amharicSectionTitle}>/ ምርጫዎች</Text>
+            PREFERENCES{" "}
+            <Text style={styles.amharicSectionTitle}>/ ምርጫዎች</Text>
           </Text>
           <Text style={styles.sectionSubtitle}>Customize your experience</Text>
         </View>
@@ -496,9 +924,205 @@ export default function ProfileScreen() {
 
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      {/* UPGRADE MODAL */}
+      <UpgradeModal
+        visible={upgradeVisible}
+        onClose={() => setUpgradeVisible(false)}
+        onSuccess={() => {
+          // Re-fetch user data to reflect new tier
+          const cancelled = { value: false };
+          void loadData(cancelled);
+        }}
+      />
     </SafeAreaView>
   );
 }
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
+const premierStyles = StyleSheet.create({
+  // Upgrade CTA (free users)
+  upgradeCard: {
+    backgroundColor: "#FFFBEB",
+    borderRadius: 20,
+    padding: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 30,
+    borderWidth: 1,
+    borderColor: "#FDE68A",
+  },
+  upgradeLeft: { flexDirection: "row", alignItems: "center", gap: 12, flex: 1 },
+  upgradeIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#FEF3C7",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  upgradeTitle: { fontSize: 14, fontWeight: "800", color: "#92400E" },
+  upgradeSubtitle: { fontSize: 12, color: "#B45309", marginTop: 2 },
+  upgradeBtn: {
+    backgroundColor: "#B45309",
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  upgradeBtnText: { color: "#fff", fontWeight: "800", fontSize: 13 },
+
+  // Premier benefits card
+  card: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 24,
+    padding: 20,
+    marginBottom: 30,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03,
+    shadowRadius: 10,
+    elevation: 2,
+  },
+  cardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 16,
+  },
+  tierBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 20,
+  },
+  tierLabel: { fontSize: 11, fontWeight: "800", letterSpacing: 0.5 },
+  cardTitle: { fontSize: 15, fontWeight: "800", color: "#111827" },
+  pillRow: { flexDirection: "row", gap: 10 },
+  pill: {
+    flex: 1,
+    backgroundColor: "#F9FAFB",
+    borderRadius: 16,
+    padding: 12,
+    alignItems: "center",
+  },
+  pillIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  pillLabel: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#111827",
+    marginBottom: 2,
+  },
+  pillSub: { fontSize: 10, color: "#6B7280", textAlign: "center" },
+  progressTrack: {
+    width: "100%",
+    height: 3,
+    backgroundColor: "#E5E7EB",
+    borderRadius: 2,
+    marginTop: 6,
+    overflow: "hidden",
+  },
+  progressFill: {
+    height: "100%",
+    backgroundColor: "#16A34A",
+    borderRadius: 2,
+  },
+});
+
+const modalStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    justifyContent: "flex-end",
+  },
+  sheet: {
+    backgroundColor: "#FFFFFF",
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    padding: 24,
+    paddingBottom: 40,
+  },
+  sheetHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 6,
+  },
+  sheetTitle: { fontSize: 18, fontWeight: "800", color: "#111827" },
+  sheetSubtitle: { fontSize: 13, color: "#6B7280", marginBottom: 20 },
+  tabs: {
+    flexDirection: "row",
+    backgroundColor: "#F3F4F6",
+    borderRadius: 14,
+    padding: 4,
+    marginBottom: 20,
+  },
+  tab: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  tabActive: { backgroundColor: "#FFFFFF" },
+  tabText: { fontSize: 13, fontWeight: "700", color: "#9CA3AF" },
+  tabTextActive: { color: "#B45309" },
+  tabTextActiveBlue: { color: "#1D4ED8" },
+  benefits: { gap: 10, marginBottom: 20 },
+  benefitRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  benefitIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#F0FDF4",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  benefitText: { fontSize: 13, color: "#374151", fontWeight: "600" },
+  priceBox: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: 4,
+    marginBottom: 16,
+  },
+  price: { fontSize: 28, fontWeight: "800", color: "#111827" },
+  pricePer: { fontSize: 14, color: "#6B7280" },
+  inputLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#6B7280",
+    marginBottom: 6,
+    marginTop: 12,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    borderRadius: 12,
+    padding: 12,
+    fontSize: 14,
+    color: "#111827",
+    backgroundColor: "#F9FAFB",
+  },
+  ctaBtn: {
+    borderRadius: 16,
+    paddingVertical: 16,
+    alignItems: "center",
+    marginTop: 20,
+  },
+  ctaBtnText: { color: "#FFFFFF", fontSize: 15, fontWeight: "800" },
+});
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F9FAFB" },
@@ -538,12 +1162,22 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     borderColor: "#FAF5ED",
   },
-  userName: {
-    fontSize: 20,
-    fontWeight: "800",
-    color: "#111827",
+  heroNameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
     marginBottom: 4,
   },
+  userName: { fontSize: 20, fontWeight: "800", color: "#111827" },
+  heroBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 20,
+  },
+  heroBadgeText: { fontSize: 10, fontWeight: "800" },
   joinDate: { fontSize: 14, color: "#6B7280", marginBottom: 16 },
   statusBadge: {
     flexDirection: "row",
@@ -608,7 +1242,11 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   graphTitle: { fontSize: 14, fontWeight: "bold", color: "#111827" },
-  amharicGraphTitle: { fontSize: 12, color: "#6B7280", fontWeight: "normal" },
+  amharicGraphTitle: {
+    fontSize: 12,
+    color: "#6B7280",
+    fontWeight: "normal",
+  },
   graphSubtitle: { fontSize: 12, color: "#9CA3AF" },
   graphContainer: { height: 100, width: "100%" },
   graphDays: {
@@ -618,7 +1256,6 @@ const styles = StyleSheet.create({
   },
   dayText: { fontSize: 11, color: "#9CA3AF" },
 
-  // ── Wallet styles ──
   walletCard: {
     backgroundColor: "#FFFFFF",
     borderRadius: 24,
@@ -640,7 +1277,11 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   walletBannerLabel: { fontSize: 12, color: "#6B7280", marginBottom: 4 },
-  walletBannerAmount: { fontSize: 26, fontWeight: "800", color: "#16A34A" },
+  walletBannerAmount: {
+    fontSize: 26,
+    fontWeight: "800",
+    color: "#16A34A",
+  },
   walletBannerIcon: {
     width: 44,
     height: 44,
@@ -655,7 +1296,11 @@ const styles = StyleSheet.create({
     color: "#6B7280",
     marginBottom: 12,
   },
-  walletEmpty: { alignItems: "center", paddingVertical: 20, gap: 8 },
+  walletEmpty: {
+    alignItems: "center",
+    paddingVertical: 20,
+    gap: 8,
+  },
   walletEmptyTxt: { fontSize: 13, color: "#9CA3AF" },
   walletViewAll: {
     flexDirection: "row",
@@ -687,7 +1332,11 @@ const styles = StyleSheet.create({
   txDate: { fontSize: 11, color: "#9CA3AF", marginTop: 2 },
   txAmount: { fontSize: 14, fontWeight: "800" },
 
-  rowItem: { flexDirection: "row", alignItems: "center", paddingVertical: 8 },
+  rowItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 8,
+  },
   iconCircle: {
     width: 40,
     height: 40,
@@ -701,7 +1350,11 @@ const styles = StyleSheet.create({
   rowTitle: { fontSize: 13, color: "#6B7280", marginBottom: 2 },
   amharicRowTitle: { fontSize: 11, color: "#9CA3AF" },
   rowValue: { fontSize: 15, fontWeight: "700", color: "#111827" },
-  divider: { height: 1, backgroundColor: "#F3F4F6", marginVertical: 16 },
+  divider: {
+    height: 1,
+    backgroundColor: "#F3F4F6",
+    marginVertical: 16,
+  },
 
   privacyBox: {
     flexDirection: "row",
@@ -724,7 +1377,11 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 4,
   },
-  langOption: { paddingHorizontal: 16, paddingVertical: 6, borderRadius: 16 },
+  langOption: {
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
   langActive: {
     backgroundColor: "#FFFFFF",
     shadowColor: "#000",

@@ -5,9 +5,13 @@ import { Conversation } from '../models/Conversation.js';
 
 export const requirePaidConversation: RequestHandler = async (req, res, next) => {
   const peerId = (req.body.receiver_id || req.query.peerId) as string;
+console.log('[requirePaidConversation] path:', req.path, '| peerId:', peerId);
+
+  // No peerId means it's a list/meta request — no gate needed
+  if (!peerId) return next();
+ console.log('[requirePaidConversation] no peerId → skipping gate');
   const userId = req.userId!;
 
-  // Look for an active conversation seeded from a paid booking
   const conversation = await Conversation.findOne({
     participants: { $all: [userId, peerId] },
     status: 'active',
@@ -20,7 +24,6 @@ export const requirePaidConversation: RequestHandler = async (req, res, next) =>
     return;
   }
 
-  // Attach to request for downstream use
   (req as any).conversation = conversation;
   next();
 };

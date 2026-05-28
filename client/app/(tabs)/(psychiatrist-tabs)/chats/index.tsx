@@ -1,17 +1,4 @@
-/**
- * PSYCHIATRIST LOBBY (chats/index.tsx)
- *
- * FIXES APPLIED:
- * 1. The `loadConversations` from chatStore was calling the old /api/messages/conversations
- *    (or similar) endpoint that returned ObjectId strings as peerName because it used
- *    the legacy `Message` aggregate. The updated `getConversations` controller now
- *    queries `Conversation` + populates `User.full_name` directly, so names are correct.
- *
- * 2. socket.off("connect") / socket.off("disconnect") removed the ENTIRE connect/disconnect
- *    handler (not just this component's). Changed to use named handler references.
- *
- * 3. No visual/UX changes. All existing styles preserved exactly.
- */
+
 
 import { useAuth } from "@clerk/clerk-expo";
 import { Ionicons } from "@expo/vector-icons";
@@ -39,7 +26,6 @@ function getAvatarColor(name: string = "A"): string {
 
 function getInitials(name: string): string {
   if (!name || name === "undefined" || name === "null") return "?";
-  // If it looks like a MongoDB ObjectId, just show "?"
   if (name.length === 24 && /^[0-9a-fA-F]+$/.test(name)) return "?";
   return name.charAt(0).toUpperCase();
 }
@@ -47,24 +33,24 @@ function getInitials(name: string): string {
 export default function PsychiatristChatsLobby() {
   const { getToken } = useAuth();
 
-  const conversations    = useChatStore((s) => s.conversations);
-  const loading          = useChatStore((s) => s.loading);
-  const setPeer          = useChatStore((s) => s.setPeer);
+  const conversations     = useChatStore((s) => s.conversations);
+  const loading           = useChatStore((s) => s.loading);
+  const setPeer           = useChatStore((s) => s.setPeer);
   const loadConversations = useChatStore((s) => s.loadConversations);
 
   const [connected,  setConnected]  = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Load conversations on mount
+  // FIX-A: pass backend JWT so the server resolves the MongoDB _id correctly
   useEffect(() => {
     const load = async () => {
-      const token = await getToken();
-      if (token && loadConversations) await loadConversations(token);
+      const token = await getToken({ template: "backend" });
+      if (token) await loadConversations(token);
     };
-    void load();
+    load();
   }, []);
 
-  // Socket connection status — FIX 2: use named handlers to avoid removing global listeners
+  // FIX-B: named handlers so cleanup only removes this component's listeners
   useEffect(() => {
     const socket = getSocket();
     if (!socket) return;
@@ -73,26 +59,41 @@ export default function PsychiatristChatsLobby() {
 
     const onConnect    = () => setConnected(true);
     const onDisconnect = () => setConnected(false);
-    const onMessageNew = () => {
-      getToken().then((token) => {
-        if (token && loadConversations) loadConversations(token);
+
+    const onMessageNew = (msg: any) => {
+      const senderId   = msg.sender_id?.toString?.() ?? msg.from;
+      const receiverId = msg.receiver_id?.toString?.() ?? msg.to;
+
+      useChatStore.setState((state) => {
+        const updated = state.conversations.map((c: any) => {
+          if (c.peerId === senderId || c.peerId === receiverId) {
+            return {
+              ...c,
+              lastMessage:     msg.content,
+              lastMessageTime: msg.timestamp ?? new Date().toISOString(),
+            };
+          }
+          return c;
+        });
+        return { conversations: updated };
       });
     };
 
-    socket.on("connect",     onConnect);
-    socket.on("disconnect",  onDisconnect);
+    socket.on("connect",    onConnect);
+    socket.on("disconnect", onDisconnect);
     socket.on("message:new", onMessageNew);
 
     return () => {
-      socket.off("connect",     onConnect);
-      socket.off("disconnect",  onDisconnect);
+      socket.off("connect",    onConnect);
+      socket.off("disconnect", onDisconnect);
       socket.off("message:new", onMessageNew);
     };
-  }, [loadConversations]);
+  }, []);
 
+  // FIX-C: backend template on refresh too (was already correct, kept explicit)
   const onRefresh = async () => {
     setRefreshing(true);
-    const token = await getToken();
+    const token = await getToken({ template: "backend" });
     if (token && loadConversations) await loadConversations(token);
     setRefreshing(false);
   };
@@ -115,12 +116,11 @@ export default function PsychiatristChatsLobby() {
   };
 
   const renderChatItem = ({ item }: { item: any }) => {
-    const peerId        = item?.peerId || item?._id;
-    // FIX 1: peerName now comes from the updated controller which resolves full_name
-    const peerName      = item?.peerName || item?.full_name || "User";
-    const lastMessage   = item?.lastMessage || "No messages yet";
-    const unreadCount   = item?.unreadCount || 0;
-    const isOnline      = item?.isOnline || false;
+    const peerId      = item?.peerId || item?._id;
+    const peerName    = item?.peerName || item?.full_name || "User";
+    const lastMessage = item?.lastMessage || "No messages yet";
+    const unreadCount = item?.unreadCount || 0;
+    const isOnline    = item?.isOnline || false;
 
     const initials    = getInitials(peerName);
     const avatarColor = getAvatarColor(peerName);
@@ -196,7 +196,9 @@ export default function PsychiatristChatsLobby() {
 
       <FlatList
         data={conversations}
-        keyExtractor={(item, index) => item?.peerId || item?._id || index.toString()}
+        keyExtractor={(item, index) =>
+          item?.peerId || item?._id || index.toString()
+        }
         renderItem={renderChatItem}
         contentContainerStyle={styles.list}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
@@ -206,29 +208,29 @@ export default function PsychiatristChatsLobby() {
 }
 
 const styles = StyleSheet.create({
-  container:       { flex: 1, backgroundColor: "#fff" },
-  loadingContainer:{ flex: 1, justifyContent: "center", alignItems: "center" },
-  loadingText:     { marginTop: 12, fontSize: 16, color: "#6b7280" },
-  header:          { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "#f3f4f6" },
-  headerTitle:     { flex: 1, fontSize: 28, fontWeight: "bold", color: "#111827" },
-  headerActions:   { flexDirection: "row", alignItems: "center", gap: 16 },
-  connectionDot:   { width: 10, height: 10, borderRadius: 5 },
-  dotOnline:       { backgroundColor: "#22c55e" },
-  dotOffline:      { backgroundColor: "#ef4444" },
-  list:            { flexGrow: 1 },
-  chatRow:         { flexDirection: "row", padding: 16, borderBottomWidth: 1, borderBottomColor: "#f9fafb", alignItems: "center" },
-  avatar:          { width: 56, height: 56, borderRadius: 28, justifyContent: "center", alignItems: "center", position: "relative" },
-  avatarTxt:       { color: "#fff", fontSize: 20, fontWeight: "bold" },
-  onlineBadge:     { position: "absolute", bottom: 2, right: 2, width: 14, height: 14, borderRadius: 7, backgroundColor: "#22c55e", borderWidth: 2, borderColor: "#fff" },
-  chatInfo:        { flex: 1, marginLeft: 14 },
-  chatHeader:      { flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 },
-  chatName:        { fontSize: 16, fontWeight: "600", color: "#111827", flex: 1, marginRight: 8 },
-  chatTime:        { fontSize: 12, color: "#9ca3af" },
-  chatFooter:      { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  lastMessage:     { flex: 1, fontSize: 14, color: "#6b7280", marginRight: 12 },
-  unreadBadge:     { backgroundColor: "#2563eb", borderRadius: 12, minWidth: 24, height: 24, justifyContent: "center", alignItems: "center", paddingHorizontal: 6 },
-  unreadText:      { color: "#fff", fontSize: 12, fontWeight: "bold" },
-  emptyWrap:       { alignItems: "center", marginTop: 100, padding: 20 },
-  emptyTitle:      { fontSize: 18, fontWeight: "600", color: "#374151", marginTop: 16 },
-  emptySub:        { fontSize: 14, color: "#6b7280", textAlign: "center", marginTop: 8 },
+  container:        { flex: 1, backgroundColor: "#fff" },
+  loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
+  loadingText:      { marginTop: 12, fontSize: 16, color: "#6b7280" },
+  header:           { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "#f3f4f6" },
+  headerTitle:      { flex: 1, fontSize: 28, fontWeight: "bold", color: "#111827" },
+  headerActions:    { flexDirection: "row", alignItems: "center", gap: 16 },
+  connectionDot:    { width: 10, height: 10, borderRadius: 5 },
+  dotOnline:        { backgroundColor: "#22c55e" },
+  dotOffline:       { backgroundColor: "#ef4444" },
+  list:             { flexGrow: 1 },
+  chatRow:          { flexDirection: "row", padding: 16, borderBottomWidth: 1, borderBottomColor: "#f9fafb", alignItems: "center" },
+  avatar:           { width: 56, height: 56, borderRadius: 28, justifyContent: "center", alignItems: "center", position: "relative" },
+  avatarTxt:        { color: "#fff", fontSize: 20, fontWeight: "bold" },
+  onlineBadge:      { position: "absolute", bottom: 2, right: 2, width: 14, height: 14, borderRadius: 7, backgroundColor: "#22c55e", borderWidth: 2, borderColor: "#fff" },
+  chatInfo:         { flex: 1, marginLeft: 14 },
+  chatHeader:       { flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 },
+  chatName:         { fontSize: 16, fontWeight: "600", color: "#111827", flex: 1, marginRight: 8 },
+  chatTime:         { fontSize: 12, color: "#9ca3af" },
+  chatFooter:       { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  lastMessage:      { flex: 1, fontSize: 14, color: "#6b7280", marginRight: 12 },
+  unreadBadge:      { backgroundColor: "#2563eb", borderRadius: 12, minWidth: 24, height: 24, justifyContent: "center", alignItems: "center", paddingHorizontal: 6 },
+  unreadText:       { color: "#fff", fontSize: 12, fontWeight: "bold" },
+  emptyWrap:        { alignItems: "center", marginTop: 100, padding: 20 },
+  emptyTitle:       { fontSize: 18, fontWeight: "600", color: "#374151", marginTop: 16 },
+  emptySub:         { fontSize: 14, color: "#6b7280", textAlign: "center", marginTop: 8 },
 });

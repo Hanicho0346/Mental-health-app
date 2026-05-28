@@ -27,12 +27,41 @@ export function getSocket(): Socket | null {
   return socket;
 }
 
-export function initSocket(): Socket {
+export function initSocket(token: string): Socket {
   if (socket?.connected) return socket;
+
   socket = io(SOCKET_URL, {
-    transports: ['websocket', 'polling'],
+    transports: ["polling", "websocket"],
+
+    auth: {
+      token,
+    },
+
     autoConnect: false,
+
+    reconnection: true,
+
+    reconnectionAttempts: 10,
+
+    reconnectionDelay: 1000,
+
+    timeout: 20000,
+
+    forceNew: true,
   });
+
+  socket.on("connect", () => {
+    console.log("[Socket] Connected:", socket.id);
+  });
+
+  socket.on("connect_error", (err) => {
+    console.log("[Socket] Connection error:", err.message);
+  });
+
+  socket.on("disconnect", (reason) => {
+    console.log("[Socket] Disconnected:", reason);
+  });
+
   return socket;
 }
 
