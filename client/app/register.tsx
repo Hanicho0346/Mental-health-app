@@ -57,7 +57,7 @@ const { sessionId, getToken } = useAuth();
       await signUp?.create({
         emailAddress: email.trim(),
         password,
-        firstName: fullName.trim().split(" ")[0],
+               firstName: fullName.trim().split(" ")[0],
         lastName: fullName.trim().split(" ").slice(1).join(" ") || "",
         unsafeMetadata: { role },
       });
@@ -422,6 +422,18 @@ if (!token) {
               />
             </View>
           </View>
+           <View style={s.inputGroup}>
+                <Text style={s.label}>National ID Number</Text>
+                <View style={s.inputContainer}>
+                  <TextInput
+                    style={s.input}
+                    placeholder="ID-12345678"
+                    placeholderTextColor="#9CA3AF"
+                    value={nationalId}
+                    onChangeText={setNationalId}
+                  />
+                </View>
+              </View>
 
           <View style={s.inputGroup}>
             <Text style={s.label}>Password / የይለፍ ቃል</Text>
