@@ -121,7 +121,7 @@ class DoctorService {
         },
       }),
       db.Appointment.distinct('user_id', psychiatristFilter(doctorId)),
-      db.Message.countDocuments({
+      db.ChatMessage.countDocuments({
         receiver_id: doctorOid,
         is_read: { $ne: true },
       }),
