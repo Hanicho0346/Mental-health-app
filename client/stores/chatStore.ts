@@ -65,7 +65,7 @@ type ChatState = {
   clear: () => void;
 };
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://192.168.137.250:4000';
+const API_URL = process.env.EXPO_PUBLIC_API_URL ;
 
 export const useChatStore = create<ChatState>((set, get) => ({
   me: null,

@@ -1,14 +1,67 @@
-import mongoose, { Schema } from 'mongoose';
+// models/ChatMessage.ts
+
+import mongoose, { Schema } from "mongoose";
 
 const chatMessageSchema = new Schema({
-  from:      { type: String, required: true },
-  to:        { type: String, required: true },
-  type:      { type: String, enum: ['text', 'voice'], default: 'text' },
-  content:   { type: String, default: '' },
-  fileUrl:   { type: String, default: '' },
-  timestamp: { type: Date, default: Date.now },
-  read:      { type: Boolean, default: false },
+  conversation_id: {
+    type: Schema.Types.ObjectId,
+    ref: "Conversation",
+    required: true,
+    index: true,
+  },
+
+  from: {
+    type: Schema.Types.ObjectId,
+    ref: "User",
+    required: true,
+    index: true,
+  },
+
+  to: {
+    type: Schema.Types.ObjectId,
+    ref: "User",
+    required: true,
+    index: true,
+  },
+
+  type: {
+    type: String,
+    enum: ["text", "voice"],
+    default: "text",
+  },
+
+  content: {
+    type: String,
+    default: "",
+  },
+
+  fileUrl: {
+    type: String,
+    default: "",
+  },
+
+  timestamp: {
+    type: Date,
+    default: Date.now,
+  },
+
+  read: {
+    type: Boolean,
+    default: false,
+  },
+
+  clientId: {
+    type: String,
+    default: null,
+  },
 });
 
-// Named differently from main Message model to avoid conflicts
-export const ChatMessage = mongoose.model('ChatMessage', chatMessageSchema);
+chatMessageSchema.index({
+  conversation_id: 1,
+  timestamp: -1,
+});
+
+export const ChatMessage = mongoose.model(
+  "ChatMessage",
+  chatMessageSchema
+);

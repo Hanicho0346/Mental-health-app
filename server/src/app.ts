@@ -17,6 +17,7 @@ import clerkRoutes from './modules/clerk/clerk.routes.js';
 import psychiatristRoutes from './modules/psychiatrist/psychiatrist.routes.js';
 import adminRoutes from './modules/admin/admin.routes.js';
 import bookingRoute from "./controllers/bookingRoute.js"
+import conversationRoutes from "./controllers/conversation.Routes.js";
 export function createApp() {
   const app = express();
 
@@ -59,6 +60,8 @@ export function createApp() {
   app.use('/api/psychiatrist', psychiatristRoutes);
   app.use('/api/admin', adminRoutes);
   app.use('/api/config', configRoutes);
+  app.use("/api/conversations", conversationRoutes);
+
   app.use('/api/users', userRoutes);
   app.use('/api/messages', messageRoutes);
   app.use('/api/bookings', bookingRoute);

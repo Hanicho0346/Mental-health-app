@@ -201,16 +201,34 @@ export default function CalendarScreen() {
                 >
                   <Text style={styles.secondaryButtonText}>Profile</Text>
                 </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.primaryButton,
-                    appt.type !== "Video Call" && { backgroundColor: "#10B981" },
-                  ]}
-                >
-                  <Text style={styles.primaryButtonText}>
-                    {appt.type === "Video Call" ? "Start Call" : "Mark Arrived"}
-                  </Text>
-                </TouchableOpacity>
+               <TouchableOpacity
+  style={[
+    styles.primaryButton,
+    appt.type !== "Video Call" && {
+      backgroundColor: "#10B981",
+    },
+  ]}
+  onPress={() => {
+    if (appt.type === "Video Call") {
+      router.push({
+        pathname:
+          "/(tabs)/(psychiatrist-tabs)/chats/[peer]",
+        params: {
+          peer: appt.patientId,
+          startCall: "true",
+        },
+      });
+    } else {
+      Alert.alert("Patient marked as arrived");
+    }
+  }}
+>
+  <Text style={styles.primaryButtonText}>
+    {appt.type === "Video Call"
+      ? "Start Call"
+      : "Mark Arrived"}
+  </Text>
+</TouchableOpacity>
               </View>
             </View>
           )}

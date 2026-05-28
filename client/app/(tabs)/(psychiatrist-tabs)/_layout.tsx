@@ -23,8 +23,13 @@ export default function PsychiatristTabLayout() {
   useEffect(() => {
     if (!user) return;
 
-    const username = user.full_name?.trim() || user.id;
-    useChatStore.getState().setMe({ userId: user.id, username });
+     const username = user.full_name?.trim() || user.id;
+    useChatStore.getState().setMe({
+    _id: user.mongoId ?? user._id,   // ← MongoDB _id from your authStore user
+    userId: user.id,                  // keep Clerk ID too if needed
+    username,
+    full_name: user.full_name ?? username,
+  });
     const token = useAuthStore.getState().accessToken ?? undefined;
     connectSocket(username, token);
   }, [user]);

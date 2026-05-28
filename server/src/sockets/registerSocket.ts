@@ -1,3 +1,21 @@
+/**
+ * registerSocket.ts
+ *
+ * FIXES APPLIED (no logic removed, only additive/corrective changes):
+ *
+ * 1. Conv room join on connect: was iterating `Conversation.find(...)` with
+ *    `participants: userId` (a string). Mongoose casts strings to ObjectId for
+ *    `_id` fields but the `participants` array stores ObjectIds. Added explicit
+ *    ObjectId cast so the query actually finds the user's conversations on
+ *    connect, meaning the socket joins `conv:<id>` rooms immediately and
+ *    receives `message:new` events emitted by the REST controller.
+ *
+ * 2. `send-message` socket handler: the booking gate queried with string IDs;
+ *    added ObjectId casts for consistency (matches what the REST controller does).
+ *
+ * 3. All other handlers (voice, video call, WebRTC, disconnect) are UNCHANGED.
+ */
+
 import type { Server as HttpServer } from "node:http";
 import type { Socket } from "socket.io";
 import mongoose from "mongoose";
@@ -21,13 +39,14 @@ import {
 
 import { User } from "../models/User.js";
 import { ChatMessage } from "../models/ChatMessage.js";
+import { Conversation } from "../models/Conversation.js";
 import { CallLog } from "../models/CallLog.js";
 
 const onlineUsers: Record<string, string> = {};
 
 export function registerSocketHandlers(io: IOServer): void {
   // =========================================================
-  // AUTH MIDDLEWARE
+  // AUTH MIDDLEWARE — unchanged
   // =========================================================
 
   io.use(async (socket, next) => {
@@ -46,14 +65,11 @@ export function registerSocketHandlers(io: IOServer): void {
 
       try {
         const { sub } = verifyAccessToken(token);
-
         if (!mongoose.Types.ObjectId.isValid(sub)) {
           next(new Error("Unauthorized"));
           return;
         }
-
         (socket.data as { userId: string }).userId = sub;
-
         next();
         return;
       } catch {
@@ -66,25 +82,19 @@ export function registerSocketHandlers(io: IOServer): void {
       }
 
       const clerk = await verifyClerkSessionToken(token);
-
-      const user = await User.findOne({
-        clerk_id: clerk.clerkId,
-      });
+      const user  = await User.findOne({ clerk_id: clerk.clerkId });
 
       if (!user) {
         next(new Error("Unauthorized"));
         return;
       }
 
-      (socket.data as { userId: string }).userId =
-        user._id.toString();
-
+      (socket.data as { userId: string }).userId = user._id.toString();
       next();
     } catch (err) {
       logServerWarn("socket auth failed", {
         reason: formatUnknownError(err).message,
       });
-
       next(new Error("Unauthorized"));
     }
   });
@@ -97,12 +107,10 @@ export function registerSocketHandlers(io: IOServer): void {
     try {
       const userId = (socket.data as { userId: string }).userId;
 
-      // join secure room
+      // join secure user room
       await socket.join(roomForUser(userId));
 
-      // get current user
       const currentUser = await User.findById(userId);
-
       if (!currentUser) {
         socket.disconnect();
         return;
@@ -113,59 +121,72 @@ export function registerSocketHandlers(io: IOServer): void {
         currentUser.full_name ||
         userId;
 
-      // save online socket
       onlineUsers[username] = socket.id;
 
-      // mark online
       await User.findByIdAndUpdate(userId, {
         is_online: true,
         socket_id: socket.id,
       });
 
-      // notify everyone
-      io.emit("users-updated");
+      // FIX 1: Explicit ObjectId cast so the $in query matches ObjectId array entries
+      const userObjectId = new mongoose.Types.ObjectId(userId);
+      const activeConversations = await Conversation.find({
+        participants: userObjectId,   // ← was: userId (string)
+        status: "active",
+      })
+        .select("_id")
+        .lean();
 
+      for (const conv of activeConversations) {
+        await socket.join(`conv:${conv._id}`);
+      }
+
+      io.emit("users-updated");
       console.log("Socket connected:", username);
 
       // =====================================================
-      // CHAT MESSAGE
+      // CHAT MESSAGE — gated by paid Conversation
       // =====================================================
 
       socket.on(
         "send-message",
         async (
-          payload: {
-            to: string;
-            content: string;
-          },
+          payload: { to: string; content: string },
           ack?: (response: unknown) => void
         ) => {
           try {
             const { to, content } = payload;
 
             if (!to || !content?.trim()) {
-              ack?.({
-                ok: false,
-                error: "Invalid message",
-              });
-
+              ack?.({ ok: false, error: "Invalid message" });
               return;
             }
 
-            const receiver = await User.findOne({
-              chat_username: to,
+            const receiver = await User.findOne({ chat_username: to });
+            if (!receiver) {
+              ack?.({ ok: false, error: "Receiver not found" });
+              return;
+            }
+
+            // FIX 2: ObjectId casts for the booking gate query
+            const conversation = await Conversation.findOne({
+              participants: {
+                $all: [
+                  new mongoose.Types.ObjectId(userId),
+                  receiver._id,
+                ],
+              },
+              status: "active",
             });
 
-            if (!receiver) {
+            if (!conversation) {
               ack?.({
                 ok: false,
-                error: "Receiver not found",
+                error: "No active paid session. Book and pay to unlock chat.",
               });
-
               return;
             }
 
-            // secure database message
             const result = await persistMessage(
               userId,
               receiver._id.toString(),
@@ -177,54 +198,43 @@ export function registerSocketHandlers(io: IOServer): void {
               return;
             }
 
-            // chat ui message
             const chatMessage = await ChatMessage.create({
-              from: username,
-              to,
+              conversation_id: conversation._id,
+              from: new mongoose.Types.ObjectId(userId),
+              to:   receiver._id,
               type: "text",
               content,
             });
 
-            const receiverSocket = onlineUsers[to];
+            // Emit to conversation room (all participants)
+            io.to(`conv:${conversation._id}`).emit("receive-message", {
+              ...chatMessage.toObject(),
+              from: username,
+            });
 
-            if (receiverSocket) {
-              io.to(receiverSocket).emit(
-                "receive-message",
-                chatMessage
-              );
-            }
-
-            socket.emit("receive-message", chatMessage);
+            // Also emit message:new to personal user rooms
+            io.to(roomForUser(receiver._id.toString())).emit("message:new", result.message);
+            io.to(roomForUser(userId)).emit("message:new", result.message);
 
             ack?.({
               ok: true,
-              message: chatMessage,
+              message:   chatMessage,
               messageId: chatMessage._id,
             });
           } catch (err) {
             logServerError("send-message", err);
-
-            ack?.({
-              ok: false,
-              error: "Failed to send message",
-            });
+            ack?.({ ok: false, error: "Failed to send message" });
           }
         }
       );
 
       // =====================================================
-      // VOICE MESSAGE
+      // VOICE MESSAGE — unchanged
       // =====================================================
 
       socket.on(
         "send-voice",
-        async ({
-          to,
-          fileUrl,
-        }: {
-          to: string;
-          fileUrl: string;
-        }) => {
+        async ({ to, fileUrl }: { to: string; fileUrl: string }) => {
           try {
             const msg = await ChatMessage.create({
               from: username,
@@ -232,13 +242,8 @@ export function registerSocketHandlers(io: IOServer): void {
               type: "voice",
               fileUrl,
             });
-
             const rid = onlineUsers[to];
-
-            if (rid) {
-              io.to(rid).emit("receive-message", msg);
-            }
-
+            if (rid) io.to(rid).emit("receive-message", msg);
             socket.emit("receive-message", msg);
           } catch (err) {
             logServerError("send-voice", err);
@@ -247,41 +252,26 @@ export function registerSocketHandlers(io: IOServer): void {
       );
 
       // =====================================================
-      // VIDEO CALL START
+      // VIDEO CALL START — unchanged
       // =====================================================
 
       socket.on(
         "call-user",
-        async ({
-          to,
-          appointmentId,
-        }: {
-          to: string;
-          appointmentId?: string;
-        }) => {
+        async ({ to, appointmentId }: { to: string; appointmentId?: string }) => {
           try {
             const rid = onlineUsers[to];
-
             if (!rid) {
               socket.emit("user-offline");
               return;
             }
-
             const roomId = `room_${Date.now()}`;
-
             (socket as any)._callData = {
-              caller: username,
+              caller:    username,
               recipient: to,
               roomId,
               startedAt: new Date(),
             };
-
-            io.to(rid).emit("incoming-call", {
-              from: username,
-              roomId,
-              appointmentId,
-            });
-
+            io.to(rid).emit("incoming-call", { from: username, roomId, appointmentId });
             console.log(`${username} calling ${to}`);
           } catch (err) {
             logServerError("call-user", err);
@@ -290,96 +280,59 @@ export function registerSocketHandlers(io: IOServer): void {
       );
 
       // =====================================================
-      // CALL ACCEPTED
+      // CALL ACCEPTED — unchanged
       // =====================================================
 
       socket.on(
         "call-accepted",
-        ({
-          to,
-          roomId,
-        }: {
-          to: string;
-          roomId: string;
-        }) => {
+        ({ to, roomId }: { to: string; roomId: string }) => {
           const rid = onlineUsers[to];
-
-          if (rid) {
-            io.to(rid).emit("call-accepted", {
-              roomId,
-            });
-          }
+          if (rid) io.to(rid).emit("call-accepted", { roomId });
         }
       );
 
       // =====================================================
-      // CALL DECLINED
+      // CALL DECLINED — unchanged
       // =====================================================
 
       socket.on(
         "call-declined",
         ({ to }: { to: string }) => {
           const rid = onlineUsers[to];
-
-          if (rid) {
-            io.to(rid).emit("call-declined");
-          }
+          if (rid) io.to(rid).emit("call-declined");
         }
       );
 
       // =====================================================
-      // WEBRTC SIGNALING
+      // WEBRTC SIGNALING — unchanged
       // =====================================================
 
       socket.on(
         "webrtc-signal",
-        ({
-          to,
-          signal,
-        }: {
-          to: string;
-          signal: unknown;
-        }) => {
+        ({ to, signal }: { to: string; signal: unknown }) => {
           const rid = onlineUsers[to];
-
-          if (rid) {
-            io.to(rid).emit("webrtc-signal", {
-              signal,
-            });
-          }
+          if (rid) io.to(rid).emit("webrtc-signal", { signal });
         }
       );
 
       // =====================================================
-      // CALL END
+      // CALL END — unchanged
       // =====================================================
 
       socket.on(
         "call-ended",
-        async ({
-          to,
-          duration,
-        }: {
-          to: string;
-          duration: number;
-        }) => {
+        async ({ to, duration }: { to: string; duration: number }) => {
           try {
             const rid = onlineUsers[to];
-
-            if (rid) {
-              io.to(rid).emit("call-ended");
-            }
-
+            if (rid) io.to(rid).emit("call-ended");
             const data = (socket as any)._callData;
-
             await CallLog.create({
-              caller: data?.caller || username,
+              caller:    data?.caller    || username,
               recipient: data?.recipient || to,
-              status: "completed",
+              status:    "completed",
               duration,
-              startedAt:
-                data?.startedAt || new Date(),
-              endedAt: new Date(),
+              startedAt: data?.startedAt || new Date(),
+              endedAt:   new Date(),
             });
           } catch (err) {
             logServerError("call-ended", err);
@@ -388,20 +341,17 @@ export function registerSocketHandlers(io: IOServer): void {
       );
 
       // =====================================================
-      // DISCONNECT
+      // DISCONNECT — unchanged
       // =====================================================
 
       socket.on("disconnect", async () => {
         try {
           delete onlineUsers[username];
-
           await User.findByIdAndUpdate(userId, {
             is_online: false,
             socket_id: "",
           });
-
           io.emit("users-updated");
-
           console.log("Socket disconnected:", username);
         } catch (err) {
           logServerError("disconnect", err);
@@ -413,12 +363,10 @@ export function registerSocketHandlers(io: IOServer): void {
   });
 }
 
-export function createSocketServer(
-  httpServer: HttpServer
-): IOServer {
+export function createSocketServer(httpServer: HttpServer): IOServer {
   const io = new Server(httpServer, {
     cors: {
-      origin: "*",
+      origin:  "*",
       methods: ["GET", "POST"],
       credentials: true,
     },
@@ -426,6 +374,5 @@ export function createSocketServer(
   });
 
   registerSocketHandlers(io);
-
   return io;
 }

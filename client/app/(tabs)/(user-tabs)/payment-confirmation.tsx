@@ -250,35 +250,6 @@ async function verifyPayment(ref: string): Promise<void> {
               </View>
             </View>
 
-            {/* Payment breakdown */}
-            <View style={s.card}>
-              <Text style={s.sectionTitle}>Payment Breakdown</Text>
-              <View style={s.priceRow}>
-                <Text style={s.priceLabel}>Session fee</Text>
-                <Text style={s.priceValue}>ETB {AMOUNT}</Text>
-              </View>
-              <View style={s.divider} />
-              <View style={s.priceRow}>
-                <View style={s.splitLabel}>
-                  <View style={[s.splitDot, { backgroundColor: GREEN_DARK }]} />
-                  <Text style={s.splitTxt}>Psychiatrist (70%)</Text>
-                </View>
-                <Text style={[s.priceValue, { color: GREEN_DARK }]}>ETB {psychiatristEarning}</Text>
-              </View>
-              <View style={s.priceRow}>
-                <View style={s.splitLabel}>
-                  <View style={[s.splitDot, { backgroundColor: '#2563EB' }]} />
-                  <Text style={s.splitTxt}>Platform (30%)</Text>
-                </View>
-                <Text style={[s.priceValue, { color: '#2563EB' }]}>ETB {platformFee}</Text>
-              </View>
-              <View style={s.divider} />
-              <View style={s.priceRow}>
-                <Text style={[s.priceLabel, { fontWeight: '700', color: '#111827' }]}>Total</Text>
-                <Text style={[s.priceValue, { color: GREEN_DARK, fontSize: 20 }]}>ETB {AMOUNT}</Text>
-              </View>
-            </View>
-
             {/* Info box */}
             <View style={s.infoBox}>
               <Feather name="shield" size={16} color={GREEN_DARK} style={{ marginTop: 1 }} />
