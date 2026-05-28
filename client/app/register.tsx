@@ -20,7 +20,7 @@ type Step = 1 | 2 | 3;
 
 export default function RegisterScreen() {
   const { signUp, setActive, isLoaded } = useSignUp();
-  // const { session } = useClerk(); // ✅ Access live session after setActive resolves
+  const { getToken } = useAuth();
 
   const [step, setStep] = useState<Step>(1);
   const [role, setRole] = useState<Role>(null);
@@ -30,9 +30,11 @@ export default function RegisterScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [otp, setOtp] = useState("");
   const [submitting, setSubmitting] = useState(false);
-const { sessionId, getToken } = useAuth();
-  // Psychiatrist fields
+
+  // Shared field
   const [nationalId, setNationalId] = useState("");
+
+  // Psychiatrist-only fields
   const [licenseNumber, setLicenseNumber] = useState("");
   const [specialization, setSpecialization] = useState("");
   const [experience, setExperience] = useState("");
@@ -41,14 +43,16 @@ const { sessionId, getToken } = useAuth();
   async function handleRegister(): Promise<void> {
     if (!isLoaded || submitting) return;
     if (!role) {
-      Alert.alert(
-        "Choose an account type",
-        "Please select user or psychiatrist.",
-      );
+      Alert.alert("Choose an account type", "Please select user or psychiatrist.");
       return;
     }
     if (!fullName.trim() || !email.trim() || !password) {
       Alert.alert("Missing fields", "Please complete all required fields.");
+      return;
+    }
+    // National ID required for both roles
+    if (!nationalId.trim()) {
+      Alert.alert("Missing field", "Please enter your National ID number.");
       return;
     }
 
@@ -57,154 +61,110 @@ const { sessionId, getToken } = useAuth();
       await signUp?.create({
         emailAddress: email.trim(),
         password,
-               firstName: fullName.trim().split(" ")[0],
+        firstName: fullName.trim().split(" ")[0],
         lastName: fullName.trim().split(" ").slice(1).join(" ") || "",
-        unsafeMetadata: { role },
+        unsafeMetadata: {
+          role,
+          national_id: nationalId.trim(),
+        },
       });
 
       await signUp?.prepareEmailAddressVerification({ strategy: "email_code" });
       setStep(3);
     } catch (e: any) {
-      const msg =
-        e?.errors?.[0]?.longMessage ?? e?.message ?? "Registration failed";
+      const msg = e?.errors?.[0]?.longMessage ?? e?.message ?? "Registration failed";
       Alert.alert("Registration failed", msg);
     } finally {
       setSubmitting(false);
     }
   }
 
- async function handleVerifyOtp(): Promise<void> {
-  if (!isLoaded || submitting) return;
+  async function handleVerifyOtp(): Promise<void> {
+    if (!isLoaded || submitting) return;
 
-  if (!otp.trim()) {
-    Alert.alert(
-      "Enter code",
-      "Please enter the verification code."
-    );
-    return;
-  }
-
-  setSubmitting(true);
-
-  try {
-    // 1. Verify OTP
-    const result = await signUp?.attemptEmailAddressVerification({
-      code: otp.trim(),
-    });
-
-    if (
-      result?.status !== "complete" ||
-      !result.createdSessionId
-    ) {
-      Alert.alert(
-        "Verification failed",
-        "Invalid verification code."
-      );
+    if (!otp.trim()) {
+      Alert.alert("Enter code", "Please enter the verification code.");
       return;
     }
 
-    // 2. Activate Clerk session
-    await setActive({
-  session: result.createdSessionId,
-});
+    setSubmitting(true);
 
-console.log("SESSION ACTIVATED");
+    try {
+      const result = await signUp?.attemptEmailAddressVerification({
+        code: otp.trim(),
+      });
 
-// wait for Clerk auth to refresh
-await new Promise(resolve => setTimeout(resolve, 1500));
+      if (result?.status !== "complete" || !result.createdSessionId) {
+        Alert.alert("Verification failed", "Invalid verification code.");
+        return;
+      }
 
-let token: string | null = null;
+      await setActive({ session: result.createdSessionId });
+      console.log("SESSION ACTIVATED");
 
-try {
-  token = await getToken({
-    template: "backend",
-  });
+      await new Promise((resolve) => setTimeout(resolve, 1500));
 
-  console.log("BACKEND TOKEN:", token);
-} catch (err) {
-  console.log("Backend token failed:", err);
-}
+      let token: string | null = null;
 
-if (!token) {
-  try {
-    token = await getToken();
+      try {
+        token = await getToken({ template: "backend" });
+        console.log("BACKEND TOKEN:", token);
+      } catch (err) {
+        console.log("Backend token failed:", err);
+      }
 
-    console.log("DEFAULT TOKEN:", token);
-  } catch (err) {
-    console.log("Default token failed:", err);
-  }
-}
+      if (!token) {
+        try {
+          token = await getToken();
+          console.log("DEFAULT TOKEN:", token);
+        } catch (err) {
+          console.log("Default token failed:", err);
+        }
+      }
 
-if (!token) {
-  Alert.alert(
-    "Session error",
-    "Could not obtain session token. Please login."
-  );
+      if (!token) {
+        Alert.alert("Session error", "Could not obtain session token. Please login.");
+        router.replace("/login");
+        return;
+      }
 
-  router.replace("/login");
-  return;
-}
+      console.log("TOKEN OK");
 
-    console.log("TOKEN OK");
+      const payload =
+        role === "psychiatrist"
+          ? {
+              role: "psychiatrist" as const,
+              national_id: nationalId.trim(),
+              medical_license: licenseNumber.trim(),
+              specialization: specialization.trim(),
+              experience_years: parseInt(experience, 10) || 0,
+            }
+          : {
+              role: "user" as const,
+              national_id: nationalId.trim(),
+            };
 
-    // 6. Build backend payload
-    const payload =
-      role === "psychiatrist"
-        ? {
-            role: "psychiatrist" as const,
-            national_id: nationalId.trim(),
-            medical_license: licenseNumber.trim(),
-            specialization: specialization.trim(),
-            experience_years:
-              parseInt(experience, 10) || 0,
-          }
-        : {
-            role: "user" as const,
-          };
+      const { syncClerkWithBackend } = await import("@/lib/clerkBackendSync");
+      const syncResult = await syncClerkWithBackend(token, payload);
 
-    // 7. Sync with backend
-    const { syncClerkWithBackend } =
-      await import("@/lib/clerkBackendSync");
+      console.log("SYNC RESULT:", syncResult);
 
-    const syncResult =
-      await syncClerkWithBackend(
-        token,
-        payload
-      );
+      if (!syncResult?.user) {
+        Alert.alert("Sync failed", "Could not sync account.");
+        router.replace("/login");
+        return;
+      }
 
-    console.log("SYNC RESULT:", syncResult);
-
-    if (!syncResult?.user) {
-      Alert.alert(
-        "Sync failed",
-        "Could not sync account."
-      );
-
-      router.replace("/login");
-      return;
+      router.replace(resolvePostAuthRoute(syncResult.user));
+    } catch (e: any) {
+      console.error("VERIFY ERROR:", e);
+      const msg =
+        e?.errors?.[0]?.longMessage || e?.message || "Verification failed";
+      Alert.alert("Verification failed", msg);
+    } finally {
+      setSubmitting(false);
     }
-
-    // 8. Navigate
-    router.replace(
-      resolvePostAuthRoute(syncResult.user)
-    );
-
-  } catch (e: any) {
-    console.error("VERIFY ERROR:", e);
-
-    const msg =
-      e?.errors?.[0]?.longMessage ||
-      e?.message ||
-      "Verification failed";
-
-    Alert.alert(
-      "Verification failed",
-      msg
-    );
-  } finally {
-    setSubmitting(false);
   }
-}
 
   // ── Step 1: Role selection ──────────────────────────────────────────────
   if (step === 1) {
@@ -213,11 +173,8 @@ if (!token) {
         <View style={s.header}>
           <TouchableOpacity
             onPress={() => {
-              if (router.canGoBack()) {
-                router.back();
-              } else {
-                router.replace("/login");
-              }
+              if (router.canGoBack()) router.back();
+              else router.replace("/login");
             }}
           >
             <Ionicons name="chevron-back" size={24} color="#111827" />
@@ -232,10 +189,7 @@ if (!token) {
 
             <TouchableOpacity
               style={s.roleCard}
-              onPress={() => {
-                setRole("user");
-                setStep(2);
-              }}
+              onPress={() => { setRole("user"); setStep(2); }}
             >
               <View style={s.roleIconCircle}>
                 <Feather name="user" size={28} color="#4ADE80" />
@@ -251,10 +205,7 @@ if (!token) {
 
             <TouchableOpacity
               style={s.roleCard}
-              onPress={() => {
-                setRole("psychiatrist");
-                setStep(2);
-              }}
+              onPress={() => { setRole("psychiatrist"); setStep(2); }}
             >
               <View style={s.roleIconCircle}>
                 <Feather name="briefcase" size={28} color="#4ADE80" />
@@ -297,12 +248,7 @@ if (!token) {
               <Feather name="mail" size={24} color="#4ADE80" />
             </View>
             <Text style={s.mainTitle}>Check your email</Text>
-            <Text
-              style={[
-                s.amharicMainTitle,
-                { fontSize: 13, color: "#6B7280", fontWeight: "400" },
-              ]}
-            >
+            <Text style={[s.amharicMainTitle, { fontSize: 13, color: "#6B7280", fontWeight: "400" }]}>
               We sent a 6-digit code to {email}
             </Text>
           </View>
@@ -313,15 +259,7 @@ if (!token) {
               <Text style={s.amharicLabel}>የማረጋገጫ ኮድ</Text>
               <View style={[s.inputContainer, { justifyContent: "center" }]}>
                 <TextInput
-                  style={[
-                    s.input,
-                    {
-                      textAlign: "center",
-                      fontSize: 24,
-                      letterSpacing: 8,
-                      fontWeight: "700",
-                    },
-                  ]}
+                  style={[s.input, { textAlign: "center", fontSize: 24, letterSpacing: 8, fontWeight: "700" }]}
                   placeholder="000000"
                   placeholderTextColor="#9CA3AF"
                   keyboardType="number-pad"
@@ -347,11 +285,7 @@ if (!token) {
 
           <TouchableOpacity
             style={{ alignItems: "center", marginTop: 16 }}
-            onPress={() =>
-              signUp?.prepareEmailAddressVerification({
-                strategy: "email_code",
-              })
-            }
+            onPress={() => signUp?.prepareEmailAddressVerification({ strategy: "email_code" })}
           >
             <Text style={{ color: "#4ADE80", fontSize: 14, fontWeight: "600" }}>
               Resend code
@@ -378,16 +312,10 @@ if (!token) {
       <ScrollView style={s.scroll}>
         <View style={s.logoSection}>
           <View style={s.iconCircle}>
-            <Feather
-              name={role === "psychiatrist" ? "briefcase" : "user"}
-              size={24}
-              color="#4ADE80"
-            />
+            <Feather name={role === "psychiatrist" ? "briefcase" : "user"} size={24} color="#4ADE80" />
           </View>
           <Text style={s.mainTitle}>
-            {role === "psychiatrist"
-              ? "Join as Psychiatrist"
-              : "Join SelamMind"}
+            {role === "psychiatrist" ? "Join as Psychiatrist" : "Join SelamMind"}
           </Text>
           <Text style={s.amharicMainTitle}>
             {role === "psychiatrist" ? "እንደ ባለሙያ ይመዝገቡ" : "ሰላምማይንድን ይቀላቀሉ"}
@@ -395,6 +323,7 @@ if (!token) {
         </View>
 
         <View style={s.formCard}>
+          {/* ── Basic Info (all roles) ── */}
           <View style={s.inputGroup}>
             <Text style={s.label}>Full Name / ሙሉ ስም</Text>
             <View style={s.inputContainer}>
@@ -422,18 +351,6 @@ if (!token) {
               />
             </View>
           </View>
-           <View style={s.inputGroup}>
-                <Text style={s.label}>National ID Number</Text>
-                <View style={s.inputContainer}>
-                  <TextInput
-                    style={s.input}
-                    placeholder="ID-12345678"
-                    placeholderTextColor="#9CA3AF"
-                    value={nationalId}
-                    onChangeText={setNationalId}
-                  />
-                </View>
-              </View>
 
           <View style={s.inputGroup}>
             <Text style={s.label}>Password / የይለፍ ቃል</Text>
@@ -447,32 +364,33 @@ if (!token) {
                 onChangeText={setPassword}
               />
               <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
-                <Feather
-                  name={showPassword ? "eye" : "eye-off"}
-                  size={20}
-                  color="#6B7280"
-                />
+                <Feather name={showPassword ? "eye" : "eye-off"} size={20} color="#6B7280" />
               </TouchableOpacity>
             </View>
           </View>
 
+          {/* ── National ID (all roles) ── */}
+          <View style={s.inputGroup}>
+            <Text style={s.label}>National ID Number / የብሔራዊ መታወቂያ ቁጥር</Text>
+            <Text style={s.amharicLabel}>Required for identity verification</Text>
+            <View style={s.inputContainer}>
+              <Feather name="credit-card" size={16} color="#9CA3AF" style={{ marginRight: 8 }} />
+              <TextInput
+                style={s.input}
+                placeholder="ID-12345678"
+                placeholderTextColor="#9CA3AF"
+                autoCapitalize="characters"
+                value={nationalId}
+                onChangeText={setNationalId}
+              />
+            </View>
+          </View>
+
+          {/* ── Psychiatrist-only fields ── */}
           {role === "psychiatrist" && (
             <>
               <View style={s.divider} />
               <Text style={s.sectionTitle}>Professional Details</Text>
-
-              <View style={s.inputGroup}>
-                <Text style={s.label}>National ID Number</Text>
-                <View style={s.inputContainer}>
-                  <TextInput
-                    style={s.input}
-                    placeholder="ID-12345678"
-                    placeholderTextColor="#9CA3AF"
-                    value={nationalId}
-                    onChangeText={setNationalId}
-                  />
-                </View>
-              </View>
 
               <View style={s.inputGroup}>
                 <Text style={s.label}>Medical License Number</Text>
@@ -523,12 +441,7 @@ if (!token) {
                   size={28}
                   color={certificateUploaded ? "#4ADE80" : "#9CA3AF"}
                 />
-                <Text
-                  style={[
-                    s.uploadText,
-                    certificateUploaded && { color: "#4ADE80" },
-                  ]}
-                >
+                <Text style={[s.uploadText, certificateUploaded && { color: "#4ADE80" }]}>
                   {certificateUploaded
                     ? "Certificate Uploaded Successfully"
                     : "Tap to upload medical certificate (PDF/JPG)"}
@@ -538,12 +451,7 @@ if (!token) {
           )}
 
           <View style={s.infoBox}>
-            <Feather
-              name="shield"
-              size={16}
-              color="#4B5563"
-              style={{ marginTop: 2 }}
-            />
+            <Feather name="shield" size={16} color="#4B5563" style={{ marginTop: 2 }} />
             <Text style={[s.infoText, { marginLeft: 10 }]}>
               Your data is private and securely encrypted.
             </Text>
@@ -613,12 +521,7 @@ const s = StyleSheet.create({
     marginRight: 16,
   },
   roleTextContainer: { flex: 1 },
-  roleTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: "#111827",
-    marginBottom: 4,
-  },
+  roleTitle: { fontSize: 18, fontWeight: "700", color: "#111827", marginBottom: 4 },
   roleDescription: { fontSize: 13, color: "#6B7280", lineHeight: 18 },
   logoSection: { alignItems: "center", marginBottom: 24, marginTop: 10 },
   iconCircle: {
@@ -631,12 +534,7 @@ const s = StyleSheet.create({
     marginBottom: 12,
   },
   mainTitle: { fontSize: 22, fontWeight: "bold", color: "#111827" },
-  amharicMainTitle: {
-    fontSize: 16,
-    color: "#4ADE80",
-    fontWeight: "bold",
-    marginTop: 4,
-  },
+  amharicMainTitle: { fontSize: 16, color: "#4ADE80", fontWeight: "bold", marginTop: 4 },
   formCard: {
     backgroundColor: "#FFFFFF",
     borderRadius: 24,
@@ -647,21 +545,11 @@ const s = StyleSheet.create({
     shadowRadius: 15,
     elevation: 2,
   },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#111827",
-    marginBottom: 16,
-  },
+  sectionTitle: { fontSize: 16, fontWeight: "700", color: "#111827", marginBottom: 16 },
   divider: { height: 1, backgroundColor: "#F3F4F6", marginVertical: 20 },
   inputGroup: { marginBottom: 16 },
   label: { fontSize: 13, fontWeight: "600", color: "#374151", marginBottom: 8 },
-  amharicLabel: {
-    fontSize: 11,
-    color: "#6B7280",
-    marginTop: 2,
-    marginBottom: 8,
-  },
+  amharicLabel: { fontSize: 11, color: "#6B7280", marginTop: 2, marginBottom: 8 },
   inputContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -683,12 +571,7 @@ const s = StyleSheet.create({
     backgroundColor: "#F9FAFB",
     marginBottom: 16,
   },
-  uploadText: {
-    fontSize: 13,
-    color: "#6B7280",
-    marginTop: 10,
-    textAlign: "center",
-  },
+  uploadText: { fontSize: 13, color: "#6B7280", marginTop: 10, textAlign: "center" },
   infoBox: {
     flexDirection: "row",
     backgroundColor: "#FFFBEB",
@@ -713,10 +596,5 @@ const s = StyleSheet.create({
     marginTop: 24,
   },
   footerText: { color: "#6B7280", fontSize: 14 },
-  footerAction: {
-    color: "#4ADE80",
-    fontSize: 14,
-    fontWeight: "bold",
-    marginLeft: 6,
-  },
+  footerAction: { color: "#4ADE80", fontSize: 14, fontWeight: "bold", marginLeft: 6 },
 });

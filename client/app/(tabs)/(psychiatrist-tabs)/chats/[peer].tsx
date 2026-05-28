@@ -10,7 +10,6 @@
  *    strings — they never equal a MongoDB _id, so every message appeared on
  *    the "them" side. Fix: use `me?._id` (set by chatStore after /api/auth/me)
  *    and fall back to Clerk userId only as a last resort, with a clear comment.
- *
  * 2. Peer name in header: was showing the raw peerId (MongoDB ObjectId string).
  *    Fix: load peer name from the conversations store / a dedicated lookup.
  *
@@ -60,7 +59,7 @@ export default function PsychiatristDirectChatScreen() {
   // middleware, so sender_id/receiver_id in responses are MongoDB _ids.
   const me = useChatStore((s) => s.me);
   const conversations = useChatStore((s) => s.conversations);
-  const currentUserId = me?._id;
+ const currentUserId = me?.userId;
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState("");

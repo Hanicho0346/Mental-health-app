@@ -121,7 +121,7 @@ export function registerSocketHandlers(io: IOServer): void {
         currentUser.full_name ||
         userId;
 
-      onlineUsers[username] = socket.id;
+      onlineUsers[userId] = socket.id;
 
       await User.findByIdAndUpdate(userId, {
         is_online: true,
@@ -162,7 +162,7 @@ export function registerSocketHandlers(io: IOServer): void {
               return;
             }
 
-            const receiver = await User.findOne({ chat_username: to });
+           const receiver = await User.findById(to);
             if (!receiver) {
               ack?.({ ok: false, error: "Receiver not found" });
               return;
@@ -209,7 +209,7 @@ export function registerSocketHandlers(io: IOServer): void {
             // Emit to conversation room (all participants)
             io.to(`conv:${conversation._id}`).emit("receive-message", {
               ...chatMessage.toObject(),
-              from: username,
+              from: userId,
             });
 
             // Also emit message:new to personal user rooms

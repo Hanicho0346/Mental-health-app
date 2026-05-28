@@ -1,5 +1,6 @@
 import { Appointment } from './Appointment';
-import { Message } from './Message.js';
+import { ChatMessage } from './ChatMessage.js';
+import { Conversation } from './Conversation.js';
 import { RefreshSession } from './RefreshSession.js';
 import { User } from './User.js';
 import { Alert } from './alert.model.js';
@@ -8,10 +9,11 @@ import './WalletTransaction.js';
 
 const db = {
   Appointment,
-  Message,
   RefreshSession,
   User,
   Alert,
+  ChatMessage,
+  Conversation,
   Video,
 };
 

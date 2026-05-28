@@ -1,7 +1,6 @@
 import type { RequestHandler } from 'express';
 import mongoose from 'mongoose';
 import type { Server as IOServer } from 'socket.io';
-import { Message } from '../models/Message.js';
 import { User } from '../models/User.js';
 import { Conversation } from '../models/Conversation.js';
 import { ChatMessage } from '../models/ChatMessage.js';
