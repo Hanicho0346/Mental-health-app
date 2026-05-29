@@ -1,6 +1,7 @@
 import type { RequestHandler } from 'express';
 import { AppError } from '../../utils/AppError.js';
 import * as authService from './auth.service.js';
+import { User } from '../../models/User.js';
 
 function isDuplicateKeyError(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: number }).code === 11000;
@@ -143,4 +144,19 @@ export const resetPassword: RequestHandler = async (req, res) => {
   } catch (err) {
     handleAuthError(res, err, 'Reset password');
   }
+};
+
+export const updatePushToken: RequestHandler = async (req, res, next) => {
+  try {
+    if (!req.userId) { res.status(401).json({ error: 'Unauthorized' }); return; }
+
+    const { push_token } = req.body as { push_token?: string };
+    if (!push_token?.trim()) {
+      res.status(400).json({ error: 'push_token is required' });
+      return;
+    }
+
+    await User.findByIdAndUpdate(req.userId, { push_token: push_token.trim() });
+    res.json({ ok: true });
+  } catch (err) { next(err); }
 };

@@ -1,14 +1,10 @@
 import fs from 'fs/promises';
 import { v2 as cloudinary } from 'cloudinary';
 import mongoose from 'mongoose';
-
+import { configureCloudinary, isCloudinaryConfigured } from './cloudinary.service.js';
 import db from '../models/index.js';
 
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-});
+configureCloudinary();
 
 interface UploadVideoData {
   title: string;
@@ -255,42 +251,88 @@ class DoctorService {
     };
   }
 
-  async uploadVideoData(doctorId: string, videoData: UploadVideoData): Promise<Record<string, unknown>> {
-    const { title, amharicTitle, tag, file } = videoData;
+ async uploadVideoData(
+  doctorId: string,
+  videoData: UploadVideoData,
+): Promise<Record<string, unknown>> {
+  const { title, amharicTitle, tag, file } = videoData;
 
-    if (!file?.path) {
-      throw new Error('Upload file path missing');
-    }
-
-    try {
-      const uploaded = await cloudinary.uploader.upload_large(file.path, {
-        resource_type: 'video',
-        folder: 'psychiatry_support_videos',
-        chunk_size: 6000000,
-      });
-
-      if (!uploaded || typeof uploaded !== 'object' || !('secure_url' in uploaded)) {
-        throw new Error('Invalid Cloudinary upload response');
-      }
-      const videoUrl = String((uploaded as { secure_url: string }).secure_url);
-
-      const docPayload = {
-        doctor_id: new mongoose.Types.ObjectId(doctorId),
-        title: title.trim() || 'Untitled',
-        amharic_title: amharicTitle.trim(),
-        category: tag.trim(),
-        video_url: videoUrl,
-      };
-
-      const newVideo = await db.Video.create(docPayload);
-      return newVideo.toObject();
-    } catch (err) {
-      console.error('Cloudinary Upload Error Details:', err);
-      throw new Error(err instanceof Error ? err.message : 'Failed to upload video to Cloudinary');
-    } finally {
-      await safeUnlinkTemp(file.path);
-    }
+  if (!file?.path) {
+    throw new Error('Upload file path missing');
   }
+
+  try {
+    console.log('Uploading video to Cloudinary:', file.path);
+
+ const uploaded = await cloudinary.uploader.upload(file.path, {
+  resource_type: 'video',
+  folder: 'psychiatry_support_videos',
+  timeout: 120000,
+});
+
+    console.log('Cloudinary upload response:', uploaded);
+
+    if (!uploaded) {
+      throw new Error('Cloudinary returned empty response');
+    }
+
+    const videoUrl =
+      uploaded.secure_url ||
+      uploaded.url ||
+      uploaded.playback_url;
+
+    if (!videoUrl) {
+      console.error('Invalid Cloudinary response:', uploaded);
+
+      throw new Error(
+        'Cloudinary upload succeeded but no video URL returned',
+      );
+    }
+
+    const docPayload = {
+      doctor_id: new mongoose.Types.ObjectId(doctorId),
+      title: title.trim() || 'Untitled',
+      amharic_title: amharicTitle.trim(),
+      category: tag.trim(),
+      video_url: videoUrl,
+    };
+
+    const newVideo = await db.Video.create(docPayload);
+
+    return newVideo.toObject();
+  } catch (err: any) {
+    console.error('Cloudinary Upload Error Details:', err);
+
+    if (
+      err?.message?.includes('provider_unavailable') ||
+      err?.error?.error_type === 'provider_unavailable'
+    ) {
+      throw new Error(
+        'Cloudinary service unavailable - check CLOUDINARY credentials or network connectivity',
+      );
+    }
+
+    if (err?.http_code === 401) {
+      throw new Error(
+        'Invalid Cloudinary credentials',
+      );
+    }
+
+    if (err?.http_code === 400) {
+      throw new Error(
+        err?.message || 'Invalid video upload request',
+      );
+    }
+
+    throw new Error(
+      err instanceof Error
+        ? err.message
+        : 'Failed to upload video to Cloudinary',
+    );
+  } finally {
+    await safeUnlinkTemp(file.path);
+  }
+}
   async getSupportVideos(): Promise<Record<string, unknown>[]> {
   const videos = await db.Video.find()
     .sort({ createdAt: -1 })

@@ -74,8 +74,41 @@ const userSchema = new Schema(
       default: 'approved',
     },
     profile_update_feedback: { type: String, default: '' },
+   subscription_tier: {
+  type: String,
+  enum: ['free', 'student', 'premier'],
+  default: 'free',
+},
 
-    // ── Wallet ───────────────────────────────────────────────────────────────
+is_premier: {
+  type: Boolean,
+  default: false,
+},
+
+premier_expires_at: {
+  type: Date,
+  default: null,
+},
+
+ai_chats_daily_limit: {
+  type: Number,
+  default: 5,
+},
+
+student_id: {
+  type: String,
+  default: '',
+},
+
+student_email: {
+  type: String,
+  default: '',
+},
+
+push_token: {
+  type: String,
+  default: '',
+},
     wallet_balance:      { type: Number, default: 0 },
     wallet_transactions: { type: [walletTransactionRefSchema], default: [] },
 

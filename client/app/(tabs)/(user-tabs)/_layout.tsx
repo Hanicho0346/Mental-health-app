@@ -1,6 +1,10 @@
+// app/(tabs)/(user-tabs)/_layout.tsx
+
 import { HapticTab } from "@/components/haptic-tab";
 import { isAdmin } from "@/lib/authGuards";
 import { useAuthStore } from "@/stores/authStore";
+import { useChatStore } from "@/stores/chatStore";
+import { connectSocket } from "@/lib/chatService";
 import { Feather } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Redirect, Tabs } from "expo-router";
@@ -12,16 +16,35 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useAuth } from "@clerk/clerk-expo";
 
 export default function UserTabLayout() {
   const [ready, setReady] = useState(false);
+  const { getToken } = useAuth();
   const accessToken = useAuthStore((s) => s.accessToken);
   const user = useAuthStore((s) => s.user);
+  const isPremier = useAuthStore((s) => s.isPremier); // ← read from store
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
 
   const compact = width < 380;
   const iconSize = compact ? 22 : 24;
+
+  useEffect(() => {
+    if (!user) return;
+    const setupSocket = async () => {
+      const username = user.full_name?.trim() || user.id;
+      const token = await getToken({ template: "backend" });
+      useChatStore.getState().setMe({
+        _id: user.id,
+        userId: user.id,
+        username,
+        full_name: user.full_name ?? username,
+      });
+      if (token) connectSocket(username, token);
+    };
+    void setupSocket();
+  }, [user, getToken]);
 
   const screenOptions = useMemo(() => {
     const bottomPad = Math.max(
@@ -44,11 +67,7 @@ export default function UserTabLayout() {
         borderTopWidth: 1,
         borderTopColor: "#F3F4F6",
         ...(Platform.OS === "web"
-          ? {
-              maxWidth: 720,
-              alignSelf: "center" as const,
-              width: "100%" as const,
-            }
+          ? { maxWidth: 720, alignSelf: "center" as const, width: "100%" as const }
           : {}),
       },
       tabBarLabelStyle: {
@@ -66,9 +85,7 @@ export default function UserTabLayout() {
         if (!useAuthStore.getState().accessToken) {
           const legacy = await AsyncStorage.getItem("token");
           if (legacy) {
-            useAuthStore
-              .getState()
-              .setSession({ accessToken: legacy, refreshToken: "" });
+            useAuthStore.getState().setSession({ accessToken: legacy, refreshToken: "" });
           }
         }
         setReady(true);
@@ -98,27 +115,45 @@ export default function UserTabLayout() {
         name="home"
         options={{
           title: "Home",
-          tabBarIcon: ({ color }) => (
-            <Feather size={iconSize} name="home" color={color} />
-          ),
+          tabBarIcon: ({ color }) => <Feather size={iconSize} name="home" color={color} />,
         }}
       />
       <Tabs.Screen
         name="chats"
         options={{
           title: "Chats",
-          tabBarIcon: ({ color }) => (
-            <Feather size={iconSize} name="message-square" color={color} />
-          ),
+          tabBarIcon: ({ color }) => <Feather size={iconSize} name="message-square" color={color} />,
         }}
       />
       <Tabs.Screen
         name="book"
         options={{
           title: "Book",
-          tabBarIcon: ({ color }) => (
-            <Feather size={iconSize} name="calendar" color={color} />
-          ),
+          tabBarIcon: ({ color }) => <Feather size={iconSize} name="calendar" color={color} />,
+        }}
+      />
+
+      {/* AI Chat — visible only for premier users */}
+      <Tabs.Screen
+        name="aichat"
+        options={
+          isPremier
+            ? {
+                title: "AI Chat",
+                headerShown: false,
+                tabBarIcon: ({ color }) => (
+                  <Feather size={iconSize} name="message-circle" color={color} />
+                ),
+              }
+            : { href: null, headerShown: false }
+        }
+      />
+
+      <Tabs.Screen
+        name="profile"
+        options={{
+          title: "Profile",
+          tabBarIcon: ({ color }) => <Feather size={iconSize} name="user" color={color} />,
         }}
       />
       <Tabs.Screen
@@ -126,16 +161,14 @@ export default function UserTabLayout() {
         options={{
           href: null,
           headerShown: false,
-          tabBarStyle: { display: "none" }, // ← hides the tab bar on this screen
+          tabBarStyle: { display: "none" },
         }}
       />
       <Tabs.Screen
-        name="profile"
+        name="notifications"
         options={{
-          title: "Profile",
-          tabBarIcon: ({ color }) => (
-            <Feather size={iconSize} name="user" color={color} />
-          ),
+          href: null, // keep hidden per your original setup
+          tabBarIcon: ({ color }) => <Feather size={iconSize} name="bell" color={color} />,
         }}
       />
     </Tabs>

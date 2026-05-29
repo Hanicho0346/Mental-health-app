@@ -148,7 +148,7 @@ export function registerSocketHandlers(io: IOServer): void {
       // CHAT MESSAGE — gated by paid Conversation
       // =====================================================
 
-      socket.on(
+socket.on(
         "send-message",
         async (
           payload: { to: string; content: string },
@@ -162,34 +162,9 @@ export function registerSocketHandlers(io: IOServer): void {
               return;
             }
 
-           const receiver = await User.findById(to);
-            if (!receiver) {
-              ack?.({ ok: false, error: "Receiver not found" });
-              return;
-            }
-
-            // FIX 2: ObjectId casts for the booking gate query
-            const conversation = await Conversation.findOne({
-              participants: {
-                $all: [
-                  new mongoose.Types.ObjectId(userId),
-                  receiver._id,
-                ],
-              },
-              status: "active",
-            });
-
-            if (!conversation) {
-              ack?.({
-                ok: false,
-                error: "No active paid session. Book and pay to unlock chat.",
-              });
-              return;
-            }
-
             const result = await persistMessage(
               userId,
-              receiver._id.toString(),
+              to,
               content
             );
 
@@ -198,28 +173,26 @@ export function registerSocketHandlers(io: IOServer): void {
               return;
             }
 
-            const chatMessage = await ChatMessage.create({
-              conversation_id: conversation._id,
-              from: new mongoose.Types.ObjectId(userId),
-              to:   receiver._id,
-              type: "text",
-              content,
-            });
+            const savedMessage = result.message;
 
             // Emit to conversation room (all participants)
-            io.to(`conv:${conversation._id}`).emit("receive-message", {
-              ...chatMessage.toObject(),
+            io.to(`conv:${result.conversationId}`).emit("receive-message", {
+              id: savedMessage.id,
+              sender_id: savedMessage.sender_id,
+              receiver_id: savedMessage.receiver_id,
+              content: savedMessage.content,
+              timestamp: savedMessage.created_at,
               from: userId,
             });
 
             // Also emit message:new to personal user rooms
-            io.to(roomForUser(receiver._id.toString())).emit("message:new", result.message);
-            io.to(roomForUser(userId)).emit("message:new", result.message);
+            io.to(roomForUser(savedMessage.receiver_id)).emit("message:new", savedMessage);
+            io.to(roomForUser(userId)).emit("message:new", savedMessage);
 
             ack?.({
               ok: true,
-              message:   chatMessage,
-              messageId: chatMessage._id,
+              message: savedMessage,
+              messageId: savedMessage.id,
             });
           } catch (err) {
             logServerError("send-message", err);

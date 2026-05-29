@@ -9,9 +9,11 @@ import { Redirect, Tabs } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Platform, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useAuth } from "@clerk/clerk-expo";
 
 export default function PsychiatristTabLayout() {
   const [ready, setReady] = useState(false);
+  const { getToken } = useAuth();
   const accessToken = useAuthStore((s) => s.accessToken);
   const user = useAuthStore((s) => s.user);
   const insets = useSafeAreaInsets();
@@ -23,16 +25,21 @@ export default function PsychiatristTabLayout() {
   useEffect(() => {
     if (!user) return;
 
-     const username = user.full_name?.trim() || user.id;
-    useChatStore.getState().setMe({
-    _id: user.mongoId ?? user._id,   // ← MongoDB _id from your authStore user
-    userId: user.id,                  // keep Clerk ID too if needed
-    username,
-    full_name: user.full_name ?? username,
-  });
-    const token = useAuthStore.getState().accessToken ?? undefined;
-    connectSocket(username, token);
-  }, [user]);
+    const setupSocket = async () => {
+      const username = user.full_name?.trim() || user.id;
+      const token = await getToken({ template: "backend" });
+      useChatStore.getState().setMe({
+        _id: user.id,
+        userId: user.id,
+        username,
+        full_name: user.full_name ?? username,
+      });
+      if (token) {
+        connectSocket(username, token);
+      }
+    };
+    void setupSocket();
+  }, [user, getToken]);
 
   const screenOptions = useMemo(() => {
     const bottomPad = Math.max(
@@ -149,6 +156,15 @@ export default function PsychiatristTabLayout() {
           title: "Profile",
           tabBarIcon: ({ color }) => (
             <Feather size={iconSize} name="user" color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="notifications"
+        options={{
+          title: "Notifications",
+          tabBarIcon: ({ color }) => (
+            <Feather size={iconSize} name="bell" color={color} />
           ),
         }}
       />

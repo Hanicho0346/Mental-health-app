@@ -1,39 +1,15 @@
-import Constants from 'expo-constants';
-import { Platform } from 'react-native';
 import { useChatStore, ChatMessage, CallLog } from '@/stores/chatStore';
-import { initSocket, getSocket, disconnectSocket } from './socket';
+import { initSocket, getSocket } from './socket';
+import { API_URL } from './api';
 
-const CHAT_PORT = 4000;
-
-function resolveChatServer(): string {
-  const hostUri = Constants.expoConfig?.hostUri;
-  if (__DEV__ && Platform.OS !== 'web' && typeof hostUri === 'string' && hostUri.length > 0) {
-    const host = hostUri.split(':')[0]?.trim();
-    const isTunnel =
-      !host ||
-      host.includes('exp.direct') ||
-      host.endsWith('.exp.host') ||
-      host.includes('expo.dev');
-    if (!isTunnel) return `http://${host}:${CHAT_PORT}`;
-  }
-  if (Platform.OS === 'android') return `http://10.0.2.2:${CHAT_PORT}`;
-  return `http://127.0.0.1:${CHAT_PORT}`;
-}
-
-export const CHAT_SERVER = resolveChatServer();
+export const CHAT_SERVER = API_URL;
 
 let _me = '';
 let _peer = () => useChatStore.getState().peer;
 
 export function connectSocket(username: string, token?: string): void {
   _me = username;
-  const socket = initSocket();
-  if (socket?.connected) return;
-
-  // Set auth token if provided
-  if (token) {
-    socket.auth = { token };
-  }
+  const socket = initSocket(token);
 
   socket.on('connect', () => {
     console.log('[Socket] Connected as:', username);
@@ -50,13 +26,22 @@ export function connectSocket(username: string, token?: string): void {
     }
   });
 
-  socket.on('receive-message', (msg: ChatMessage) => {
+  socket.on('receive-message', (msg: any) => {
     const peer = _peer();
     if (!peer) return;
+    const senderId = msg.sender_id?.toString?.() ?? msg.from;
+    const receiverId = msg.receiver_id?.toString?.() ?? msg.to;
     const involves =
-      (msg.from === _me && msg.to === peer) ||
-      (msg.from === peer && msg.to === _me);
-    if (involves) useChatStore.getState().appendMessage(msg);
+      (senderId === _me && receiverId === peer) ||
+      (senderId === peer && receiverId === _me);
+    if (involves) {
+      useChatStore.getState().appendMessage({
+        ...msg,
+        from: senderId,
+        to: receiverId,
+        timestamp: msg.created_at ?? msg.timestamp,
+      });
+    }
   });
 
   socket.on('connect_error', (err) => {

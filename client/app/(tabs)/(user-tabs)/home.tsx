@@ -90,7 +90,12 @@ export default function HomeScreen() {
             try {
               // Initialize global chat state and connect socket
               const username = data.full_name?.trim() || data.id;
-              useChatStore.getState().setMe({ userId: data.id, username });
+              useChatStore.getState().setMe({
+               _id: data.id,
+               userId: data.id,
+               username: data.full_name,
+               full_name: data.full_name,
+             });
               // Pass access token if available to authenticate socket (optional)
               const token = useAuthStore.getState().accessToken ?? undefined;
               connectSocket(username, token);

@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import axios from "axios";
 import { Platform } from "react-native";
 
 import { resolveApiBaseUrl } from "@/lib/resolveApiUrl";
@@ -36,7 +37,9 @@ async function resolveAccessToken(): Promise<string | undefined> {
   return asyncToken ?? undefined;
 }
 
-function normalizeVideoFile(video: UploadSupportVideoPayload["video"]) {
+function normalizeVideoFile(
+  video: UploadSupportVideoPayload["video"],
+) {
   const safeName =
     video.name && video.name.includes(".")
       ? video.name
@@ -57,12 +60,21 @@ function normalizeVideoFile(video: UploadSupportVideoPayload["video"]) {
 export async function uploadSupportVideo(
   payload: UploadSupportVideoPayload,
 ): Promise<{ message?: string; video?: unknown }> {
-  const { title, amharicTitle, tag, video, onProgress } = payload;
+  const {
+    title,
+    amharicTitle,
+    tag,
+    video,
+    onProgress,
+  } = payload;
 
   const formData = new FormData();
 
   formData.append("title", title.trim());
-  formData.append("amharicTitle", amharicTitle.trim());
+  formData.append(
+    "amharicTitle",
+    amharicTitle.trim(),
+  );
   formData.append("tag", tag.trim());
 
   formData.append(
@@ -72,81 +84,99 @@ export async function uploadSupportVideo(
 
   const token = await resolveAccessToken();
 
-  const controller = new AbortController();
-
-  const timeoutId = setTimeout(() => {
-    controller.abort();
-  }, 10 * 60 * 1000);
-
   try {
     if (__DEV__) {
-      console.log("[UPLOAD] endpoint:", uploadEndpoint());
-      console.log("[UPLOAD] file:", normalizeVideoFile(video));
+      console.log(
+        "[UPLOAD] endpoint:",
+        uploadEndpoint(),
+      );
+
+      console.log(
+        "[UPLOAD] file:",
+        normalizeVideoFile(video),
+      );
     }
 
-    const response = await fetch(uploadEndpoint(), {
-      method: "POST",
+    const response = await axios.post(
+      uploadEndpoint(),
+      formData,
+      {
+        headers: {
+          Accept: "application/json",
+          "Content-Type":
+            "multipart/form-data",
 
-      headers: {
-        Accept: "application/json",
+          ...(token
+            ? {
+                Authorization: `Bearer ${token}`,
+              }
+            : {}),
+        },
 
-        ...(token
-          ? {
-              Authorization: `Bearer ${token}`,
-            }
-          : {}),
+        timeout: 10 * 60 * 1000,
+
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity,
+
+        onUploadProgress: (
+          progressEvent,
+        ) => {
+          if (!progressEvent.total) return;
+
+          const progress =
+            progressEvent.loaded /
+            progressEvent.total;
+
+          onProgress?.(progress);
+        },
       },
+    );
 
-      body: formData,
-
-      signal: controller.signal,
-    });
-
-    const rawText = await response.text();
-
-    let data: any = {};
-
-    try {
-      data = rawText ? JSON.parse(rawText) : {};
-    } catch {
-      data = {
-        raw: rawText,
-      };
-    }
+    const data = response.data;
 
     if (__DEV__) {
-      console.log("[UPLOAD] status:", response.status);
-      console.log("[UPLOAD] response:", data);
-    }
+      console.log(
+        "[UPLOAD] status:",
+        response.status,
+      );
 
-    if (!response.ok) {
-      throw new Error(
-        data?.message ||
-          data?.error ||
-          `Upload failed (${response.status})`,
+      console.log(
+        "[UPLOAD] response:",
+        data,
       );
     }
 
     onProgress?.(1);
 
     return data;
-  } catch (error) {
-    if (error instanceof Error) {
-      if (error.name === "AbortError") {
-        throw new Error(
-          "Upload timed out. Please check your internet connection.",
-        );
-      }
+  } catch (error: any) {
+    console.error(
+      "[UPLOAD ERROR FULL]:",
+      error?.response?.data ||
+        error?.message ||
+        error,
+    );
 
-      console.error("[UPLOAD ERROR]:", error.message);
-
-      throw error;
+    if (error?.code === "ECONNABORTED") {
+      throw new Error(
+        "Upload timed out. Please check your internet connection.",
+      );
     }
 
-    console.error("[UPLOAD ERROR]:", error);
+    if (
+      error?.message?.includes(
+        "Network Error",
+      )
+    ) {
+      throw new Error(
+        "Cannot connect to server. Check your backend IP and internet connection.",
+      );
+    }
 
-    throw new Error("Something went wrong during upload.");
-  } finally {
-    clearTimeout(timeoutId);
+    throw new Error(
+      error?.response?.data?.message ||
+        error?.message ||
+        "Something went wrong during upload.",
+    );
   }
 }

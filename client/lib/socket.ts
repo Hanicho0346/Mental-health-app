@@ -27,26 +27,17 @@ export function getSocket(): Socket | null {
   return socket;
 }
 
-export function initSocket(token: string): Socket {
+export function initSocket(token?: string): Socket {
   if (socket?.connected) return socket;
 
   socket = io(SOCKET_URL, {
     transports: ["polling", "websocket"],
-
-    auth: {
-      token,
-    },
-
+    auth: token ? { token } : {},
     autoConnect: false,
-
     reconnection: true,
-
     reconnectionAttempts: 10,
-
     reconnectionDelay: 1000,
-
     timeout: 20000,
-
     forceNew: true,
   });
 

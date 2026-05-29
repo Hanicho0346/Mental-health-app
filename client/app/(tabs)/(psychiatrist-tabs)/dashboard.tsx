@@ -20,6 +20,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { uploadSupportVideo } from "@/lib/uploadSupportVideo";
 import { api } from "@/lib/api";
+import { getSocket } from "@/lib/socket";
 
 const DEFAULT_AVATAR =
   "https://images.unsplash.com/photo-1612349317150-e413f6a5b16d?w=100&h=100&fit=crop";
@@ -61,6 +62,7 @@ export default function DashboardScreen() {
   // --- API DATA STATES ---
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
 
   const [alerts, setAlerts] = useState<any[]>([]);
   const [appointments, setAppointments] = useState<any[]>([]);
@@ -87,15 +89,17 @@ export default function DashboardScreen() {
     try {
       setIsLoading(true);
 
-      const [statsRes, alertsRes, apptsRes] = await Promise.all([
+      const [statsRes, alertsRes, apptsRes, notifRes] = await Promise.all([
         api.get("/doctor/dashboard/stats"),
         api.get("/doctor/dashboard/alerts"),
         api.get("/doctor/appointments/today"),
+        api.get("/notifications/unread-count"),
       ]);
 
       setStatValues(normalizeDashboardStats(statsRes.data));
       setAlerts(Array.isArray(alertsRes.data) ? alertsRes.data : []);
       setAppointments(Array.isArray(apptsRes.data) ? apptsRes.data : []);
+      setUnreadNotificationCount(notifRes.data?.unread_count ?? 0);
     } catch (error) {
       console.error(error);
 
@@ -113,6 +117,25 @@ export default function DashboardScreen() {
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     fetchDashboardData();
+  }, []);
+
+  // Listen for real-time notification updates
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket) return;
+
+    const handleNotificationUpdate = () => {
+      api.get("/notifications/unread-count")
+        .then((res) => {
+          setUnreadNotificationCount(res.data?.unread_count ?? 0);
+        })
+        .catch(() => {});
+    };
+
+    socket.on("notification:new", handleNotificationUpdate);
+    return () => {
+      socket.off("notification:new", handleNotificationUpdate);
+    };
   }, []);
 
   const DASHBOARD_STATS = [
@@ -252,9 +275,12 @@ export default function DashboardScreen() {
             <Text style={styles.headerTitle}>{doctorName}</Text>
           </View>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.bellIcon}>
+        <TouchableOpacity
+          style={styles.bellIcon}
+          onPress={() => router.push("/notifications")}
+        >
           <Feather name="bell" size={24} color="#111827" />
-          {statValues.unreadMessagesCount > 0 && (
+          {unreadNotificationCount > 0 && (
             <View style={styles.notificationDot} />
           )}
         </TouchableOpacity>

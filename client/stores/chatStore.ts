@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import axios from 'axios';
+import { API_URL } from "@/lib/api";
 
 export type ChatUser = {
   _id: string;
@@ -47,25 +48,23 @@ export type TimelineItem =
   | (CallLog & { _kind: "call" });
 
 type ChatState = {
-  me: ChatUser | null;
-  users: ChatUser[];
-  conversations: Conversation[];
-  peer: string | null;
-  timeline: TimelineItem[];
-  loading: boolean;
-  
-  setMe: (me: ChatUser | null) => void;
-  setUsers: (users: ChatUser[]) => void;
-  setConversations: (items: Conversation[]) => void;
-  setPeer: (peer: string | null) => void;
-  setTimeline: (items: TimelineItem[]) => void;
-  appendMessage: (msg: ChatMessage) => void;
-  appendCallLog: (log: CallLog) => void;
-  loadConversations: (token: string) => Promise<void>;
-  clear: () => void;
+   me: ChatUser | null;
+   users: ChatUser[];
+   conversations: Conversation[];
+   peer: string | null;
+   timeline: TimelineItem[];
+   loading: boolean;
+   
+   setMe: (me: ChatUser | null) => void;
+   setUsers: (users: ChatUser[]) => void;
+   setConversations: (items: Conversation[]) => void;
+   setPeer: (peer: string | null) => void;
+   setTimeline: (items: TimelineItem[]) => void;
+   appendMessage: (msg: ChatMessage) => void;
+   appendCallLog: (log: CallLog) => void;
+   loadConversations: (token: string) => Promise<void>;
+   clear: () => void;
 };
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL ;
 
 export const useChatStore = create<ChatState>((set, get) => ({
   me: null,

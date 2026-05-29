@@ -18,8 +18,7 @@ import { useAuth } from "@clerk/clerk-expo";
 import axios from "axios";
 import { getSocket } from "@/lib/socket";
 import { useChatStore } from "@/stores/chatStore";
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL;
+import { API_URL } from "@/lib/api";
 
 type Message = {
   id: string;
@@ -46,14 +45,14 @@ export default function UserDirectChatScreen() {
   const flatListRef = useRef<FlatList>(null);
   const tempIds = useRef<Set<string>>(new Set());
 
-  // ── Load history ────────────────────────────────────────────────────────
-  const loadHistory = useCallback(async () => {
-    if (!peerId) {
-      setLoading(false);
-      return;
-    }
-    try {
-      const token = await getToken();
+// ── Load history ────────────────────────────────────────────────────────
+   const loadHistory = useCallback(async () => {
+     if (!peerId) {
+       setLoading(false);
+       return;
+     }
+     try {
+       const token = await getToken({ template: "backend" });
       if (!token) {
         setLoading(false);
         return;
@@ -86,11 +85,11 @@ export default function UserDirectChatScreen() {
     }
   }, [peerId, getToken]);
 
-  // ── Load peer name from my-psychiatrists list ───────────────────────────
-  const loadPeerName = useCallback(async () => {
-    if (!peerId) return;
-    try {
-      const token = await getToken();
+// ── Load peer name from my-psychiatrists list ───────────────────────────
+   const loadPeerName = useCallback(async () => {
+     if (!peerId) return;
+     try {
+       const token = await getToken({ template: "backend" });
       const { data } = await axios.get(
         `${API_URL}/api/bookings/my-psychiatrists`,
         {
@@ -129,7 +128,9 @@ export default function UserDirectChatScreen() {
     };
 
     const onReceive = (msg: any) => {
-      if (msg.from !== peerId && msg.to !== peerId) return;
+      const senderId = msg.sender_id?.toString?.() ?? msg.from;
+      const receiverId = msg.receiver_id?.toString?.() ?? msg.to;
+      if (senderId !== peerId && receiverId !== peerId) return;
       setMessages((prev) => {
         const id = msg._id?.toString() ?? msg.id;
         if (prev.find((m) => m.id === id)) return prev;
@@ -137,10 +138,10 @@ export default function UserDirectChatScreen() {
           ...prev,
           {
             id,
-            sender_id: msg.from,
-            receiver_id: msg.to,
+            sender_id: senderId,
+            receiver_id: receiverId,
             content: msg.content,
-            created_at: msg.timestamp ?? new Date().toISOString(),
+            created_at: msg.created_at ?? msg.timestamp ?? new Date().toISOString(),
             status: "sent" as const,
           },
         ];
@@ -173,10 +174,6 @@ export default function UserDirectChatScreen() {
   // ── Send via REST ───────────────────────────────────────────────────────
   const sendMessage = useCallback(async () => {
     if (!draft.trim() || !peerId || sending) return;
-    console.log("ME:", me);
-    console.log("Current user ID:", me?._id);
-    console.log("Sending message to", peerId);
-    console.log("Current user ID:", currentUserId);
     setSending(true);
     const tempId = `temp-${Date.now()}-${Math.random()}`;
     const content = draft.trim();
@@ -195,8 +192,8 @@ export default function UserDirectChatScreen() {
     setDraft("");
     setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
 
-    try {
-      const token = await getToken();
+try {
+       const token = await getToken({ template: "backend" });
       if (!token) throw new Error("No auth token");
 
       const { data } = await axios.post(
