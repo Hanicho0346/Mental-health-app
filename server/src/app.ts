@@ -54,8 +54,11 @@ export function createApp() {
   // Chapa redirects here after payment — shows a simple page so the user can return to the app
   app.get('/payment-return', (req, res) => {
     const tx_ref = (req.query.trx_ref ?? req.query.tx_ref ?? '') as string;
+    const deepLink = tx_ref
+      ? `mental-health-mobile://payment-return?tx_ref=${encodeURIComponent(tx_ref)}`
+      : `mental-health-mobile://`;
     res.setHeader('Content-Type', 'text/html');
-    res.send(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Payment Complete</title><style>body{font-family:sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f0fdf4;color:#111827}.card{background:#fff;border-radius:20px;padding:40px 32px;text-align:center;box-shadow:0 4px 24px rgba(0,0,0,.08);max-width:360px;width:90%}h1{color:#16a34a;font-size:24px;margin-bottom:8px}p{color:#6b7280;font-size:15px;line-height:1.6}.ref{font-size:12px;color:#9ca3af;margin-top:16px;word-break:break-all}</style></head><body><div class="card"><div style="font-size:52px">✅</div><h1>Payment Complete</h1><p>Your session has been booked. Return to the SelamMind app to continue.</p>${tx_ref ? `<p class="ref">Ref: ${tx_ref}</p>` : ''}</div></body></html>`);
+    res.send(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Payment Complete</title><style>body{font-family:sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f0fdf4;color:#111827}.card{background:#fff;border-radius:20px;padding:40px 32px;text-align:center;box-shadow:0 4px 24px rgba(0,0,0,.08);max-width:360px;width:90%}h1{color:#16a34a;font-size:24px;margin-bottom:8px}p{color:#6b7280;font-size:15px;line-height:1.6}.ref{font-size:12px;color:#9ca3af;margin-top:16px;word-break:break-all}.btn{display:inline-block;margin-top:24px;background:#16a34a;color:#fff;text-decoration:none;padding:14px 28px;border-radius:12px;font-size:16px;font-weight:700}</style><script>setTimeout(function(){window.location.href=\"${deepLink}\"},2000);</script></head><body><div class="card"><div style="font-size:52px">✅</div><h1>Payment Complete</h1><p>Returning you to the SelamMind app…</p>${tx_ref ? `<p class="ref">Ref: ${tx_ref}</p>` : ''}<a class=\"btn\" href=\"${deepLink}\">Open App →</a></div></body></html>`);
   });
   cron.schedule('0 21 * * *', () => {
   void resetDailyAiUsage();

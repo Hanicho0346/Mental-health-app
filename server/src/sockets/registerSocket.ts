@@ -1,53 +1,35 @@
 /**
- * registerSocket.ts
+ * registerSocket.ts — fixed version
  *
- * FIXES APPLIED (no logic removed, only additive/corrective changes):
- *
- * 1. Conv room join on connect: was iterating `Conversation.find(...)` with
- *    `participants: userId` (a string). Mongoose casts strings to ObjectId for
- *    `_id` fields but the `participants` array stores ObjectIds. Added explicit
- *    ObjectId cast so the query actually finds the user's conversations on
- *    connect, meaning the socket joins `conv:<id>` rooms immediately and
- *    receives `message:new` events emitted by the REST controller.
- *
- * 2. `send-message` socket handler: the booking gate queried with string IDs;
- *    added ObjectId casts for consistency (matches what the REST controller does).
- *
- * 3. All other handlers (voice, video call, WebRTC, disconnect) are UNCHANGED.
+ * Fix 1: onlineUsers keyed/deleted consistently by userId (was set by userId,
+ *         deleted by username — causing stale socket IDs and broken video calls)
+ * Fix 2: Socket Clerk auth now uses verifyToken directly (same as authenticate.ts)
+ *         instead of verifyClerkSessionToken which calls Clerk API and is slow/fragile
+ * Fix 3: ObjectId cast on Conversation query (already present, kept)
  */
 
 import type { Server as HttpServer } from "node:http";
 import type { Socket } from "socket.io";
 import mongoose from "mongoose";
 import { Server, type Server as IOServer } from "socket.io";
+import { verifyToken } from "@clerk/backend";
 
 import { roomForUser } from "../controllers/messageController.js";
 import { persistMessage } from "../services/messageService.js";
-
-import {
-  formatUnknownError,
-  logServerError,
-  logServerWarn,
-} from "../utils/logger.js";
-
+import { formatUnknownError, logServerError, logServerWarn } from "../utils/logger.js";
 import { verifyAccessToken } from "../utils/jwt.js";
-
-import {
-  isClerkConfigured,
-  verifyClerkSessionToken,
-} from "../utils/clerk.js";
-
+import { isClerkConfigured } from "../utils/clerk.js";
 import { User } from "../models/User.js";
 import { ChatMessage } from "../models/ChatMessage.js";
 import { Conversation } from "../models/Conversation.js";
 import { CallLog } from "../models/CallLog.js";
 
+// userId → socket.id
 const onlineUsers: Record<string, string> = {};
 
 export function registerSocketHandlers(io: IOServer): void {
-  // =========================================================
-  // AUTH MIDDLEWARE — unchanged
-  // =========================================================
+
+  // ── AUTH MIDDLEWARE ──────────────────────────────────────────────────────────
 
   io.use(async (socket, next) => {
     try {
@@ -58,84 +40,67 @@ export function registerSocketHandlers(io: IOServer): void {
           ? socket.handshake.headers.authorization.slice(7)
           : undefined);
 
-      if (!token) {
-        next(new Error("Unauthorized"));
-        return;
-      }
+      if (!token) { next(new Error("Unauthorized")); return; }
 
+      // Try legacy JWT first
       try {
         const { sub } = verifyAccessToken(token);
-        if (!mongoose.Types.ObjectId.isValid(sub)) {
-          next(new Error("Unauthorized"));
-          return;
-        }
+        if (!mongoose.Types.ObjectId.isValid(sub)) { next(new Error("Unauthorized")); return; }
         (socket.data as { userId: string }).userId = sub;
         next();
         return;
-      } catch {
-        // fallback to Clerk
-      }
+      } catch { /* fall through to Clerk */ }
 
-      if (!isClerkConfigured()) {
+      // FIX 2: Use verifyToken directly (same as authenticate.ts) — no API call needed
+      if (!isClerkConfigured()) { next(new Error("Unauthorized")); return; }
+
+      try {
+        const payload = await verifyToken(token, {
+          secretKey: process.env.CLERK_SECRET_KEY ?? "",
+          clockSkewInMs: 15_000,
+        });
+        const clerkId = payload.sub;
+        if (!clerkId) { next(new Error("Unauthorized")); return; }
+
+        const user = await User.findOne({ clerk_id: clerkId }).select("_id").lean();
+        if (!user) { next(new Error("Unauthorized")); return; }
+
+        (socket.data as { userId: string }).userId = user._id.toString();
+        next();
+      } catch (err) {
+        logServerWarn("socket clerk auth failed", { reason: formatUnknownError(err).message });
         next(new Error("Unauthorized"));
-        return;
       }
-
-      const clerk = await verifyClerkSessionToken(token);
-      const user  = await User.findOne({ clerk_id: clerk.clerkId });
-
-      if (!user) {
-        next(new Error("Unauthorized"));
-        return;
-      }
-
-      (socket.data as { userId: string }).userId = user._id.toString();
-      next();
     } catch (err) {
-      logServerWarn("socket auth failed", {
-        reason: formatUnknownError(err).message,
-      });
+      logServerWarn("socket auth failed", { reason: formatUnknownError(err).message });
       next(new Error("Unauthorized"));
     }
   });
 
-  // =========================================================
-  // CONNECTION
-  // =========================================================
+  // ── CONNECTION ───────────────────────────────────────────────────────────────
 
   io.on("connection", async (socket: Socket) => {
     try {
       const userId = (socket.data as { userId: string }).userId;
 
-      // join secure user room
       await socket.join(roomForUser(userId));
 
-      const currentUser = await User.findById(userId);
-      if (!currentUser) {
-        socket.disconnect();
-        return;
-      }
+      const currentUser = await User.findById(userId).lean();
+      if (!currentUser) { socket.disconnect(); return; }
 
-      const username =
-        currentUser.chat_username ||
-        currentUser.full_name ||
-        userId;
+      const username = currentUser.chat_username || currentUser.full_name || userId;
 
+      // FIX 1: key by userId consistently
       onlineUsers[userId] = socket.id;
 
-      await User.findByIdAndUpdate(userId, {
-        is_online: true,
-        socket_id: socket.id,
-      });
+      await User.findByIdAndUpdate(userId, { is_online: true, socket_id: socket.id });
 
-      // FIX 1: Explicit ObjectId cast so the $in query matches ObjectId array entries
+      // Join all active conversation rooms
       const userObjectId = new mongoose.Types.ObjectId(userId);
       const activeConversations = await Conversation.find({
-        participants: userObjectId,   // ← was: userId (string)
+        participants: userObjectId,
         status: "active",
-      })
-        .select("_id")
-        .lean();
+      }).select("_id").lean();
 
       for (const conv of activeConversations) {
         await socket.join(`conv:${conv._id}`);
@@ -144,56 +109,33 @@ export function registerSocketHandlers(io: IOServer): void {
       io.emit("users-updated");
       console.log("Socket connected:", username);
 
-      // =====================================================
-      // CHAT MESSAGE — gated by paid Conversation
-      // =====================================================
+      // ── CHAT MESSAGE ───────────────────────────────────────────────────────
 
-socket.on(
+      socket.on(
         "send-message",
-        async (
-          payload: { to: string; content: string },
-          ack?: (response: unknown) => void
-        ) => {
+        async (payload: { to: string; content: string }, ack?: (r: unknown) => void) => {
           try {
             const { to, content } = payload;
+            if (!to || !content?.trim()) { ack?.({ ok: false, error: "Invalid message" }); return; }
 
-            if (!to || !content?.trim()) {
-              ack?.({ ok: false, error: "Invalid message" });
-              return;
-            }
-
-            const result = await persistMessage(
-              userId,
-              to,
-              content
-            );
-
-            if (!result.ok) {
-              ack?.(result);
-              return;
-            }
+            const result = await persistMessage(userId, to, content);
+            if (!result.ok) { ack?.(result); return; }
 
             const savedMessage = result.message;
 
-            // Emit to conversation room (all participants)
             io.to(`conv:${result.conversationId}`).emit("receive-message", {
-              id: savedMessage.id,
-              sender_id: savedMessage.sender_id,
+              id:          savedMessage.id,
+              sender_id:   savedMessage.sender_id,
               receiver_id: savedMessage.receiver_id,
-              content: savedMessage.content,
-              timestamp: savedMessage.created_at,
-              from: userId,
+              content:     savedMessage.content,
+              timestamp:   savedMessage.created_at,
+              from:        userId,
             });
 
-            // Also emit message:new to personal user rooms
             io.to(roomForUser(savedMessage.receiver_id)).emit("message:new", savedMessage);
             io.to(roomForUser(userId)).emit("message:new", savedMessage);
 
-            ack?.({
-              ok: true,
-              message: savedMessage,
-              messageId: savedMessage.id,
-            });
+            ack?.({ ok: true, message: savedMessage, messageId: savedMessage.id });
           } catch (err) {
             logServerError("send-message", err);
             ack?.({ ok: false, error: "Failed to send message" });
@@ -201,151 +143,81 @@ socket.on(
         }
       );
 
-      // =====================================================
-      // VOICE MESSAGE — unchanged
-      // =====================================================
+      // ── VOICE MESSAGE ──────────────────────────────────────────────────────
 
-      socket.on(
-        "send-voice",
-        async ({ to, fileUrl }: { to: string; fileUrl: string }) => {
-          try {
-            const msg = await ChatMessage.create({
-              from: username,
-              to,
-              type: "voice",
-              fileUrl,
-            });
-            const rid = onlineUsers[to];
-            if (rid) io.to(rid).emit("receive-message", msg);
-            socket.emit("receive-message", msg);
-          } catch (err) {
-            logServerError("send-voice", err);
-          }
-        }
-      );
-
-      // =====================================================
-      // VIDEO CALL START — unchanged
-      // =====================================================
-
-      socket.on(
-        "call-user",
-        async ({ to, appointmentId }: { to: string; appointmentId?: string }) => {
-          try {
-            const rid = onlineUsers[to];
-            if (!rid) {
-              socket.emit("user-offline");
-              return;
-            }
-            const roomId = `room_${Date.now()}`;
-            (socket as any)._callData = {
-              caller:    username,
-              recipient: to,
-              roomId,
-              startedAt: new Date(),
-            };
-            io.to(rid).emit("incoming-call", { from: username, roomId, appointmentId });
-            console.log(`${username} calling ${to}`);
-          } catch (err) {
-            logServerError("call-user", err);
-          }
-        }
-      );
-
-      // =====================================================
-      // CALL ACCEPTED — unchanged
-      // =====================================================
-
-      socket.on(
-        "call-accepted",
-        ({ to, roomId }: { to: string; roomId: string }) => {
+      socket.on("send-voice", async ({ to, fileUrl }: { to: string; fileUrl: string }) => {
+        try {
+          const msg = await ChatMessage.create({ from: username, to, type: "voice", fileUrl });
           const rid = onlineUsers[to];
-          if (rid) io.to(rid).emit("call-accepted", { roomId });
-        }
-      );
+          if (rid) io.to(rid).emit("receive-message", msg);
+          socket.emit("receive-message", msg);
+        } catch (err) { logServerError("send-voice", err); }
+      });
 
-      // =====================================================
-      // CALL DECLINED — unchanged
-      // =====================================================
+      // ── VIDEO CALL ─────────────────────────────────────────────────────────
 
-      socket.on(
-        "call-declined",
-        ({ to }: { to: string }) => {
+      socket.on("call-user", async ({ to, appointmentId }: { to: string; appointmentId?: string }) => {
+        try {
           const rid = onlineUsers[to];
-          if (rid) io.to(rid).emit("call-declined");
-        }
-      );
+          if (!rid) { socket.emit("user-offline"); return; }
+          const roomId = `room_${Date.now()}`;
+          (socket as any)._callData = { caller: username, recipient: to, roomId, startedAt: new Date() };
+          io.to(rid).emit("incoming-call", { from: username, roomId, appointmentId });
+        } catch (err) { logServerError("call-user", err); }
+      });
 
-      // =====================================================
-      // WEBRTC SIGNALING — unchanged
-      // =====================================================
+      socket.on("call-accepted", ({ to, roomId }: { to: string; roomId: string }) => {
+        const rid = onlineUsers[to];
+        if (rid) io.to(rid).emit("call-accepted", { roomId });
+      });
 
-      socket.on(
-        "webrtc-signal",
-        ({ to, signal }: { to: string; signal: unknown }) => {
+      socket.on("call-declined", ({ to }: { to: string }) => {
+        const rid = onlineUsers[to];
+        if (rid) io.to(rid).emit("call-declined");
+      });
+
+      socket.on("webrtc-signal", ({ to, signal }: { to: string; signal: unknown }) => {
+        const rid = onlineUsers[to];
+        if (rid) io.to(rid).emit("webrtc-signal", { signal });
+      });
+
+      socket.on("call-ended", async ({ to, duration }: { to: string; duration: number }) => {
+        try {
           const rid = onlineUsers[to];
-          if (rid) io.to(rid).emit("webrtc-signal", { signal });
-        }
-      );
+          if (rid) io.to(rid).emit("call-ended");
+          const data = (socket as any)._callData;
+          await CallLog.create({
+            caller:    data?.caller    || username,
+            recipient: data?.recipient || to,
+            status:    "completed",
+            duration,
+            startedAt: data?.startedAt || new Date(),
+            endedAt:   new Date(),
+          });
+        } catch (err) { logServerError("call-ended", err); }
+      });
 
-      // =====================================================
-      // CALL END — unchanged
-      // =====================================================
-
-      socket.on(
-        "call-ended",
-        async ({ to, duration }: { to: string; duration: number }) => {
-          try {
-            const rid = onlineUsers[to];
-            if (rid) io.to(rid).emit("call-ended");
-            const data = (socket as any)._callData;
-            await CallLog.create({
-              caller:    data?.caller    || username,
-              recipient: data?.recipient || to,
-              status:    "completed",
-              duration,
-              startedAt: data?.startedAt || new Date(),
-              endedAt:   new Date(),
-            });
-          } catch (err) {
-            logServerError("call-ended", err);
-          }
-        }
-      );
-
-      // =====================================================
-      // DISCONNECT — unchanged
-      // =====================================================
+      // ── DISCONNECT ─────────────────────────────────────────────────────────
 
       socket.on("disconnect", async () => {
         try {
-          delete onlineUsers[username];
-          await User.findByIdAndUpdate(userId, {
-            is_online: false,
-            socket_id: "",
-          });
+          // FIX 1: delete by userId (was deleting by username — wrong key, stale entries)
+          delete onlineUsers[userId];
+          await User.findByIdAndUpdate(userId, { is_online: false, socket_id: "" });
           io.emit("users-updated");
           console.log("Socket disconnected:", username);
-        } catch (err) {
-          logServerError("disconnect", err);
-        }
+        } catch (err) { logServerError("disconnect", err); }
       });
-    } catch (err) {
-      logServerError("socket connection", err);
-    }
+
+    } catch (err) { logServerError("socket connection", err); }
   });
 }
 
 export function createSocketServer(httpServer: HttpServer): IOServer {
   const io = new Server(httpServer, {
-    cors: {
-      origin:  "*",
-      methods: ["GET", "POST"],
-      credentials: true,
-    },
+    cors: { origin: "*", methods: ["GET", "POST"], credentials: true },
     transports: ["websocket", "polling"],
   });
-
   registerSocketHandlers(io);
   return io;
 }
