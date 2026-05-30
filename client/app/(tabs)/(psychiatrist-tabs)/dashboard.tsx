@@ -1,4 +1,5 @@
 import { useAuthStore } from "@/stores/authStore";
+import { useAuth } from "@clerk/clerk-expo";
 import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
@@ -74,6 +75,7 @@ export default function DashboardScreen() {
   });
 
   // --- UPLOAD MODAL STATES ---
+  const { getToken } = useAuth();
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [selectedVideo, setSelectedVideo] =
@@ -195,6 +197,7 @@ export default function DashboardScreen() {
   };
 
   const handleUploadVideo = async () => {
+    const token = await getToken({ template: "backend" }) ?? await getToken() ?? undefined;
     if (!selectedVideo) {
       Alert.alert("Please select a video");
       return;
@@ -211,6 +214,7 @@ export default function DashboardScreen() {
         title: videoForm.title,
         amharicTitle: videoForm.amharicTitle,
         tag: videoForm.tag,
+        token,
 
         video: {
           uri: selectedVideo.uri,
