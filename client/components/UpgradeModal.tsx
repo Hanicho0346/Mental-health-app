@@ -1,7 +1,21 @@
+/**
+ * components/UpgradeModal.tsx
+ *
+ * Bottom-sheet modal for upgrading to Premier.
+ * Tabs: Premier (Chapa payment) | Student Discount (ID/email verify)
+ *
+ * Premier flow:
+ *  1. POST /subscriptions/premier/initiate → { checkout_url, tx_ref }
+ *  2. Open Chapa in system browser via Linking.openURL (not WebBrowser —
+ *     WebBrowser blocks the JS thread and prevents the deep-link from firing)
+ *  3. Chapa redirects to selamind://payment-return?tx_ref=...
+ *  4. payment-return.tsx handles verification + isPremier update
+ */
+
 import { api } from '@/lib/api';
 import { getApiErrorMessage } from '@/lib/log';
 import { Feather } from '@expo/vector-icons';
-import * as WebBrowser from 'expo-web-browser';
+import * as Linking from 'expo-linking';
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
@@ -14,113 +28,158 @@ import {
   View,
 } from 'react-native';
 
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+type Tab = 'premier' | 'student';
+
 type Props = {
   visible: boolean;
   onClose: () => void;
-  onSuccess: () => void; // called after student verify only; Chapa goes via deep link
+  /** Called after student verify succeeds — re-fetch profile data */
+  onSuccess: () => void;
 };
 
-export function UpgradeModal({ visible, onClose, onSuccess }: Props) {
-  const [tab, setTab] = useState<'premier' | 'student'>('premier');
-  const [studentId, setStudentId] = useState('');
-  const [studentEmail, setStudentEmail] = useState('');
-  const [loading, setLoading] = useState(false);
+// ─── Component ───────────────────────────────────────────────────────────────
 
-  async function handlePremierSubscribe() {
+export function UpgradeModal({ visible, onClose, onSuccess }: Props) {
+  const [tab, setTab]                 = useState<Tab>('premier');
+  const [studentId, setStudentId]     = useState('');
+  const [studentEmail, setStudentEmail] = useState('');
+  const [loading, setLoading]         = useState(false);
+
+  // ── Premier ────────────────────────────────────────────────────────────────
+
+  async function handlePremierSubscribe(): Promise<void> {
     setLoading(true);
     try {
       const res = await api.post<{ tx_ref: string; checkout_url: string }>(
         '/subscriptions/premier/initiate'
       );
 
-      // Close modal before opening browser so it doesn't linger behind
+      const { checkout_url } = res.data;
+
+      if (!checkout_url) {
+        Alert.alert('Error', 'No checkout URL returned. Please try again.');
+        return;
+      }
+
+      // Close the modal BEFORE opening the browser so there's no UI stack issue
       onClose();
 
-      // Open Chapa's hosted payment page in the system browser.
-      // When Chapa finishes it redirects to selamind://payment-return?tx_ref=...
-      // which Expo Router handles in app/payment-return.tsx
-      await WebBrowser.openBrowserAsync(res.data.checkout_url, {
-        dismissButtonStyle: 'close',
-        presentationStyle: WebBrowser.WebBrowserPresentationStyle.FULL_SCREEN,
-      });
+      // Use Linking.openURL (not WebBrowser) — this hands off to the system
+      // browser and immediately returns, leaving the JS bridge free to receive
+      // the deep-link redirect when Chapa sends the user back.
+      const canOpen = await Linking.canOpenURL(checkout_url);
+      if (!canOpen) {
+        Alert.alert('Cannot open browser', 'Please visit: ' + checkout_url);
+        return;
+      }
 
-      // WebBrowser.openBrowserAsync resolves when the user dismisses the browser.
-      // The actual verification + unlock happens in payment-return.tsx via deep link.
-    } catch (e: any) {
+      await Linking.openURL(checkout_url);
+      // → user completes payment in browser
+      // → Chapa redirects to selamind://payment-return?tx_ref=...
+      // → app/payment-return.tsx takes over
+
+    } catch (e: unknown) {
       Alert.alert('Could not start payment', getApiErrorMessage(e));
     } finally {
       setLoading(false);
     }
   }
 
-  async function handleStudentVerify() {
-    if (!studentId.trim() && !studentEmail.trim()) {
-      Alert.alert('Required', 'Please enter your student ID or .edu email.');
+  // ── Student ────────────────────────────────────────────────────────────────
+
+  async function handleStudentVerify(): Promise<void> {
+    const id    = studentId.trim();
+    const email = studentEmail.trim();
+
+    if (!id && !email) {
+      Alert.alert('Required', 'Please enter your student ID or university email.');
       return;
     }
+
     setLoading(true);
     try {
       await api.post('/subscriptions/student-verify', {
-        student_id: studentId.trim() || undefined,
-        student_email: studentEmail.trim() || undefined,
+        student_id:    id    || undefined,
+        student_email: email || undefined,
       });
       Alert.alert('✅ Student Verified!', 'Your student discount has been applied.');
-      onSuccess(); // refresh profile data
+      onSuccess();
       onClose();
-    } catch (e) {
+    } catch (e: unknown) {
       Alert.alert('Verification failed', getApiErrorMessage(e));
     } finally {
       setLoading(false);
     }
   }
 
+  // ── Reset state on close ───────────────────────────────────────────────────
+
+  function handleClose(): void {
+    if (loading) return; // don't allow close mid-request
+    setStudentId('');
+    setStudentEmail('');
+    setLoading(false);
+    onClose();
+  }
+
+  // ─── Render ───────────────────────────────────────────────────────────────
+
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      transparent
+      onRequestClose={handleClose}
+    >
       <View style={s.overlay}>
         <View style={s.sheet}>
-          {/* Header */}
+
+          {/* ── Header ── */}
           <View style={s.sheetHeader}>
             <Text style={s.sheetTitle}>Unlock Premier Access</Text>
-            <TouchableOpacity onPress={onClose}>
+            <TouchableOpacity onPress={handleClose} disabled={loading} hitSlop={12}>
               <Feather name="x" size={22} color="#6B7280" />
             </TouchableOpacity>
           </View>
           <Text style={s.sheetSubtitle}>Choose how you'd like to upgrade</Text>
 
-          {/* Tabs */}
+          {/* ── Tab switcher ── */}
           <View style={s.tabs}>
-            {(['premier', 'student'] as const).map((t) => (
-              <TouchableOpacity
-                key={t}
-                style={[s.tab, tab === t && s.tabActive]}
-                onPress={() => setTab(t)}
-              >
-                <Feather
-                  name={t === 'premier' ? 'star' : 'book-open'}
-                  size={14}
-                  color={
-                    tab === t
-                      ? t === 'premier' ? '#B45309' : '#1D4ED8'
-                      : '#9CA3AF'
-                  }
-                />
-                <Text
-                  style={[
-                    s.tabText,
-                    tab === t && (t === 'premier' ? s.tabTextAmber : s.tabTextBlue),
-                  ]}
+            {(['premier', 'student'] as Tab[]).map((t) => {
+              const isActive = tab === t;
+              const activeColor = t === 'premier' ? '#B45309' : '#1D4ED8';
+              return (
+                <TouchableOpacity
+                  key={t}
+                  style={[s.tab, isActive && s.tabActive]}
+                  onPress={() => setTab(t)}
+                  disabled={loading}
                 >
-                  {t === 'premier' ? 'Premier' : 'Student Discount'}
-                </Text>
-              </TouchableOpacity>
-            ))}
+                  <Feather
+                    name={t === 'premier' ? 'star' : 'book-open'}
+                    size={14}
+                    color={isActive ? activeColor : '#9CA3AF'}
+                  />
+                  <Text
+                    style={[
+                      s.tabText,
+                      isActive && { color: activeColor },
+                    ]}
+                  >
+                    {t === 'premier' ? 'Premier' : 'Student Discount'}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
 
-          {/* Benefits — same for both tabs */}
+          {/* ── Benefits (shared) ── */}
           <View style={s.benefits}>
             {[
-              { icon: 'message-circle', text: 'Unlimited AI chat sessions' },
-              { icon: 'zap',            text: 'Daily streak tracking & rewards' },
+              { icon: 'message-circle', text: 'Unlimited AI chat with Dr. Selam' },
+              { icon: 'zap',            text: 'Daily streak tracking & rewards'  },
               { icon: 'users',          text: 'Access to group chats & community' },
             ].map((b) => (
               <View key={b.text} style={s.benefitRow}>
@@ -132,22 +191,36 @@ export function UpgradeModal({ visible, onClose, onSuccess }: Props) {
             ))}
           </View>
 
-          {/* Tab content */}
+          {/* ── Tab content ── */}
           {tab === 'premier' ? (
             <>
+              {/* Price */}
               <View style={s.priceBox}>
                 <Text style={s.price}>ETB 299</Text>
                 <Text style={s.pricePer}>/month</Text>
               </View>
+
+              {/* Info note */}
+              <View style={s.infoRow}>
+                <Feather name="shield" size={13} color="#16A34A" />
+                <Text style={s.infoTxt}>
+                  You'll be taken to Chapa's secure payment page. The app will confirm
+                  automatically when you return.
+                </Text>
+              </View>
+
               <TouchableOpacity
-                style={[s.ctaBtn, { backgroundColor: '#B45309' }]}
-                onPress={handlePremierSubscribe}
+                style={[s.ctaBtn, { backgroundColor: '#B45309' }, loading && s.ctaBtnDisabled]}
+                onPress={() => void handlePremierSubscribe()}
                 disabled={loading}
               >
                 {loading ? (
                   <ActivityIndicator color="#fff" />
                 ) : (
-                  <Text style={s.ctaBtnText}>Pay with Chapa →</Text>
+                  <>
+                    <Feather name="credit-card" size={16} color="#fff" style={{ marginRight: 8 }} />
+                    <Text style={s.ctaBtnText}>Pay ETB 299 with Chapa</Text>
+                  </>
                 )}
               </TouchableOpacity>
             </>
@@ -160,8 +233,10 @@ export function UpgradeModal({ visible, onClose, onSuccess }: Props) {
                 value={studentId}
                 onChangeText={setStudentId}
                 placeholderTextColor="#9CA3AF"
+                editable={!loading}
               />
-              <Text style={s.inputLabel}>Or .edu / university email</Text>
+
+              <Text style={s.inputLabel}>Or university email (.edu / .edu.et)</Text>
               <TextInput
                 style={s.input}
                 placeholder="you@university.edu.et"
@@ -170,10 +245,12 @@ export function UpgradeModal({ visible, onClose, onSuccess }: Props) {
                 keyboardType="email-address"
                 autoCapitalize="none"
                 placeholderTextColor="#9CA3AF"
+                editable={!loading}
               />
+
               <TouchableOpacity
-                style={[s.ctaBtn, { backgroundColor: '#1D4ED8' }]}
-                onPress={handleStudentVerify}
+                style={[s.ctaBtn, { backgroundColor: '#1D4ED8' }, loading && s.ctaBtnDisabled]}
+                onPress={() => void handleStudentVerify()}
                 disabled={loading}
               >
                 {loading ? (
@@ -184,11 +261,14 @@ export function UpgradeModal({ visible, onClose, onSuccess }: Props) {
               </TouchableOpacity>
             </>
           )}
+
         </View>
       </View>
     </Modal>
   );
 }
+
+// ─── Styles ──────────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
   overlay: {
@@ -197,7 +277,7 @@ const s = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   sheet: {
-    backgroundColor: '#fff',
+    backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
     padding: 24,
@@ -211,6 +291,7 @@ const s = StyleSheet.create({
   },
   sheetTitle: { fontSize: 18, fontWeight: '800', color: '#111827' },
   sheetSubtitle: { fontSize: 13, color: '#6B7280', marginBottom: 20 },
+
   tabs: {
     flexDirection: 'row',
     backgroundColor: '#F3F4F6',
@@ -227,10 +308,9 @@ const s = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 10,
   },
-  tabActive: { backgroundColor: '#fff' },
+  tabActive: { backgroundColor: '#FFFFFF' },
   tabText: { fontSize: 13, fontWeight: '700', color: '#9CA3AF' },
-  tabTextAmber: { color: '#B45309' },
-  tabTextBlue: { color: '#1D4ED8' },
+
   benefits: { gap: 10, marginBottom: 20 },
   benefitRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   benefitIcon: {
@@ -242,14 +322,32 @@ const s = StyleSheet.create({
     alignItems: 'center',
   },
   benefitText: { fontSize: 13, color: '#374151', fontWeight: '600' },
+
   priceBox: {
     flexDirection: 'row',
     alignItems: 'baseline',
     gap: 4,
-    marginBottom: 16,
+    marginBottom: 12,
   },
   price: { fontSize: 28, fontWeight: '800', color: '#111827' },
   pricePer: { fontSize: 14, color: '#6B7280' },
+
+  infoRow: {
+    flexDirection: 'row',
+    gap: 8,
+    backgroundColor: '#F0FDF4',
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 4,
+    alignItems: 'flex-start',
+  },
+  infoTxt: {
+    flex: 1,
+    fontSize: 12,
+    color: '#374151',
+    lineHeight: 18,
+  },
+
   inputLabel: {
     fontSize: 12,
     fontWeight: '700',
@@ -266,11 +364,15 @@ const s = StyleSheet.create({
     color: '#111827',
     backgroundColor: '#F9FAFB',
   },
+
   ctaBtn: {
+    flexDirection: 'row',
     borderRadius: 16,
     paddingVertical: 16,
     alignItems: 'center',
+    justifyContent: 'center',
     marginTop: 20,
   },
-  ctaBtnText: { color: '#fff', fontSize: 15, fontWeight: '800' },
+  ctaBtnDisabled: { opacity: 0.6 },
+  ctaBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '800' },
 });
