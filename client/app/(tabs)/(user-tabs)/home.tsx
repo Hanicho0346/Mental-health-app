@@ -21,7 +21,7 @@ import {
   FlatList,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import image1 from "../../../assets/images/image.png";
+import image1 from "../../../assets/images/image-photo.png";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
