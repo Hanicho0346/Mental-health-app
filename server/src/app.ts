@@ -22,6 +22,7 @@ import conversationRoutes from "./controllers/conversation.Routes.js";
 import cron from 'node-cron';
 import { resetDailyAiUsage } from './utils/resetDailyAiUsage.js';
 import subscriptionRoutes from './routes/subscription.routes.js';
+import aichat from './routes/aichat.js';
 export function createApp() {
   const app = express();
 
@@ -81,6 +82,7 @@ app.use('/api/users', userRoutes);
   app.use('/api/appointments', appointmentRoutes);
  app.use('/api/doctor', doctorRoutes);
   app.use('/api/chat', chatRoutes);
+ app.use('/api/ai-chat', aichat); // For AI chat features that might be added later
 
   app.use((_req, res) => {
     res.status(404).json({ error: 'Not found' });

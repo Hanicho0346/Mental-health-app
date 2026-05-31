@@ -31,10 +31,8 @@ type Message = {
 
 export default function UserDirectChatScreen() {
   const { peer: peerId } = useLocalSearchParams<{ peer: string }>();
-  const { getToken, userId } = useAuth();
+  const { getToken } = useAuth();
   const me = useChatStore((s) => s.me);
-
-  // userId from Clerk is the Clerk ID — backend resolves it to MongoDB _id via JWT middleware
   const currentUserId = me?.userId;
 
   const [messages, setMessages] = useState<Message[]>([]);
@@ -42,35 +40,56 @@ export default function UserDirectChatScreen() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [peerName, setPeerName] = useState<string>("");
+
   const flatListRef = useRef<FlatList>(null);
   const tempIds = useRef<Set<string>>(new Set());
 
-// ── Load history ────────────────────────────────────────────────────────
-   const loadHistory = useCallback(async () => {
-     if (!peerId) {
-       setLoading(false);
-       return;
-     }
-     try {
-       const token = await getToken({ template: "backend" });
-      if (!token) {
-        setLoading(false);
-        return;
+  // ── Cache the token so we don't call getToken on every request ──────────
+  const cachedToken = useRef<string | null>(null);
+  const tokenExpiry = useRef<number>(0);
+
+  const getAuthToken = useCallback(async (): Promise<string | null> => {
+    const now = Date.now();
+    // Reuse cached token if still valid (5 min buffer)
+    if (cachedToken.current && now < tokenExpiry.current - 5 * 60 * 1000) {
+      return cachedToken.current;
+    }
+    try {
+      const token = await getToken({ template: "backend" });
+      if (token) {
+        cachedToken.current = token;
+        // Clerk tokens typically last 60 min
+        tokenExpiry.current = now + 60 * 60 * 1000;
       }
+      return token;
+    } catch {
+      return null;
+    }
+  }, [getToken]);
+
+  // ── Guard against concurrent fetches ────────────────────────────────────
+  const historyFetching = useRef(false);
+  const peerFetching = useRef(false);
+
+  // ── Load history ─────────────────────────────────────────────────────────
+  const loadHistory = useCallback(async () => {
+    if (!peerId || historyFetching.current) return;
+    historyFetching.current = true;
+    setLoading(true);
+    try {
+      const token = await getAuthToken();
+      if (!token) return;
 
       const { data } = await axios.get(`${API_URL}/api/messages`, {
         params: { peerId },
         headers: { Authorization: `Bearer ${token}` },
-        timeout: 10000,
+        timeout: 10_000,
       });
 
       if (Array.isArray(data)) {
         setMessages(data.map((m: any) => ({ ...m, status: "sent" as const })));
         tempIds.current.clear();
-        setTimeout(
-          () => flatListRef.current?.scrollToEnd({ animated: false }),
-          100,
-        );
+        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: false }), 100);
       }
     } catch (err: any) {
       if (err?.response?.status === 403) {
@@ -80,37 +99,43 @@ export default function UserDirectChatScreen() {
           [{ text: "OK", onPress: () => router.back() }],
         );
       }
+      // 429 — just silently skip, messages already in state
     } finally {
       setLoading(false);
+      historyFetching.current = false;
     }
-  }, [peerId, getToken]);
+  }, [peerId, getAuthToken]);
 
-// ── Load peer name from my-psychiatrists list ───────────────────────────
-   const loadPeerName = useCallback(async () => {
-     if (!peerId) return;
-     try {
-       const token = await getToken({ template: "backend" });
-      const { data } = await axios.get(
-        `${API_URL}/api/bookings/my-psychiatrists`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        },
-      );
-      const match = (data.psychiatrists ?? []).find(
-        (p: any) => p.id === peerId,
-      );
+  // ── Load peer name ────────────────────────────────────────────────────────
+  const loadPeerName = useCallback(async () => {
+    if (!peerId || peerFetching.current || peerName) return;
+    peerFetching.current = true;
+    try {
+      const token = await getAuthToken();
+      if (!token) return;
+
+      const { data } = await axios.get(`${API_URL}/api/bookings/my-psychiatrists`, {
+        headers: { Authorization: `Bearer ${token}` },
+        timeout: 10_000,
+      });
+
+      const match = (data.psychiatrists ?? []).find((p: any) => p.id === peerId);
       if (match) setPeerName(match.full_name);
     } catch {
-      /* silently fail — header will show ID as fallback */
+      // silently fail — header shows fallback
+    } finally {
+      peerFetching.current = false;
     }
-  }, [peerId, getToken]);
+  }, [peerId, getAuthToken, peerName]);
 
+  // Load once on mount only
   useEffect(() => {
     void loadHistory();
     void loadPeerName();
-  }, [loadHistory, loadPeerName]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // ── Socket ──────────────────────────────────────────────────────────────
+  // ── Socket ────────────────────────────────────────────────────────────────
   useEffect(() => {
     const socket = getSocket();
     if (!socket || !peerId) return;
@@ -121,16 +146,14 @@ export default function UserDirectChatScreen() {
         if (prev.find((m) => m.id === data.id)) return prev;
         return [...prev, { ...data, status: "sent" as const }];
       });
-      setTimeout(
-        () => flatListRef.current?.scrollToEnd({ animated: true }),
-        100,
-      );
+      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
     };
 
     const onReceive = (msg: any) => {
       const senderId = msg.sender_id?.toString?.() ?? msg.from;
       const receiverId = msg.receiver_id?.toString?.() ?? msg.to;
       if (senderId !== peerId && receiverId !== peerId) return;
+
       setMessages((prev) => {
         const id = msg._id?.toString() ?? msg.id;
         if (prev.find((m) => m.id === id)) return prev;
@@ -146,20 +169,15 @@ export default function UserDirectChatScreen() {
           },
         ];
       });
-      setTimeout(
-        () => flatListRef.current?.scrollToEnd({ animated: true }),
-        100,
-      );
+      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
     };
-
-    // WebRTC listeners — untouched
-    socket.on("incoming-call", ({ from }: { from: string }) => {});
-    socket.on("call-accepted", () => {});
-    socket.on("call-declined", () => {});
-    socket.on("call-ended", () => {});
 
     socket.on("message:new", onMessageNew);
     socket.on("receive-message", onReceive);
+    socket.on("incoming-call", (_: any) => {});
+    socket.on("call-accepted", () => {});
+    socket.on("call-declined", () => {});
+    socket.on("call-ended", () => {});
 
     return () => {
       socket.off("message:new", onMessageNew);
@@ -171,10 +189,11 @@ export default function UserDirectChatScreen() {
     };
   }, [peerId]);
 
-  // ── Send via REST ───────────────────────────────────────────────────────
+  // ── Send message ──────────────────────────────────────────────────────────
   const sendMessage = useCallback(async () => {
     if (!draft.trim() || !peerId || sending) return;
     setSending(true);
+
     const tempId = `temp-${Date.now()}-${Math.random()}`;
     const content = draft.trim();
 
@@ -192,8 +211,8 @@ export default function UserDirectChatScreen() {
     setDraft("");
     setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
 
-try {
-       const token = await getToken({ template: "backend" });
+    try {
+      const token = await getAuthToken();
       if (!token) throw new Error("No auth token");
 
       const { data } = await axios.post(
@@ -214,20 +233,11 @@ try {
         );
       });
     } catch (err: any) {
-      console.log("SEND MESSAGE FULL ERROR:");
-      console.log(err);
-
-      console.log("STATUS:");
-      console.log(err?.response?.status);
-
-      console.log("DATA:");
-      console.log(err?.response?.data);
-
-      console.log("MESSAGE:");
-      console.log(err?.message);
-
+      const status = err?.response?.status;
       const errMsg =
-        err?.response?.data?.error || err?.message || "Failed to send message";
+        status === 429
+          ? "Sending too fast. Please wait a moment."
+          : err?.response?.data?.error ?? err?.message ?? "Failed to send message";
 
       Alert.alert("Error", errMsg);
 
@@ -236,28 +246,21 @@ try {
           m.id === tempId ? { ...m, status: "error" as const } : m,
         ),
       );
-
       tempIds.current.delete(tempId);
     } finally {
       setSending(false);
     }
-  }, [draft, peerId, currentUserId, sending, getToken]);
+  }, [draft, peerId, currentUserId, sending, getAuthToken]);
 
   const startCall = () => getSocket()?.emit("call-user", { to: peerId });
 
-  // ── Render ──────────────────────────────────────────────────────────────
+  // ── Render ────────────────────────────────────────────────────────────────
   const renderMessage = ({ item }: { item: Message }) => {
     const isMe = item.sender_id === currentUserId;
     return (
-      <View
-        style={[styles.msgWrapper, isMe ? styles.msgRight : styles.msgLeft]}
-      >
-        <View
-          style={[styles.bubble, isMe ? styles.bubbleMe : styles.bubbleThem]}
-        >
-          <Text style={isMe ? styles.textMe : styles.textThem}>
-            {item.content}
-          </Text>
+      <View style={[styles.msgWrapper, isMe ? styles.msgRight : styles.msgLeft]}>
+        <View style={[styles.bubble, isMe ? styles.bubbleMe : styles.bubbleThem]}>
+          <Text style={isMe ? styles.textMe : styles.textThem}>{item.content}</Text>
           <View style={styles.msgFooter}>
             <Text
               style={[
@@ -271,11 +274,7 @@ try {
               })}
             </Text>
             {isMe && item.status === "sending" && (
-              <ActivityIndicator
-                size="small"
-                color="#a7f3d0"
-                style={{ marginLeft: 4 }}
-              />
+              <ActivityIndicator size="small" color="#a7f3d0" style={{ marginLeft: 4 }} />
             )}
             {isMe && item.status === "sent" && (
               <Ionicons name="checkmark-done" size={14} color="#fff" />
@@ -294,9 +293,7 @@ try {
       <SafeAreaView style={styles.container}>
         <View style={styles.center}>
           <ActivityIndicator size="large" color="#2563eb" />
-          <Text style={{ marginTop: 10, color: "#6b7280" }}>
-            Loading messages...
-          </Text>
+          <Text style={{ marginTop: 10, color: "#6b7280" }}>Loading messages...</Text>
         </View>
       </SafeAreaView>
     );

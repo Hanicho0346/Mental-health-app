@@ -348,6 +348,31 @@ class DoctorService {
     createdAt: video.createdAt,
   }));
 }
+async incrementListen(videoId: string) {
+  return db.Video.findByIdAndUpdate(
+    videoId,
+    { $inc: { listens: 1 } },
+    { new: true }
+  );
+}
+
+async toggleFavorite(videoId: string, userId: string) {
+   const video = await db.Video.findById(videoId);
+  if (!video) return null;
+
+  const favs: mongoose.Types.ObjectId[] = video.favorites ?? [];
+  const objId = new mongoose.Types.ObjectId(userId);
+  const alreadyFav = favs.some((f) => f.equals(objId));
+
+  if (alreadyFav) {
+    video.favorites = favs.filter((f) => !f.equals(objId));
+  } else {
+    video.favorites.push(objId);
+  }
+
+  await video.save();
+  return { isFavorite: !alreadyFav };
+}
 }
 
 export default new DoctorService();

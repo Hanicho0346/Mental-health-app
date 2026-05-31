@@ -11,6 +11,8 @@ import {
   getUrgentAlerts,
   uploadSupportVideo,
   getSupportVideos,
+  incrementVideoListen,
+  toggleVideoFavorite,
 } from '../controllers/doctor.controller.js';
 import { requireAuth } from '../middleware/authenticate.js';
 import { requirePsychiatristAccess } from '../middleware/requireApprovedPsychiatrist.js';
@@ -36,6 +38,8 @@ router.get('/appointments/date', ...doctorGate, getAppointmentsByDate);
 router.get('/appointments', ...doctorGate, getAppointmentsByDate);
 router.get('/patients/:patientId', ...doctorGate, getPatientProfile);
 router.get('/patients', ...doctorGate, getPatients);
+router.post('/videos/:id/listen', requireAuth, incrementVideoListen);
+router.post('/videos/:id/toggle-favorite', requireAuth, toggleVideoFavorite);
 router.post('/videos/upload', ...doctorGate, upload.single('video'), uploadSupportVideo);
 router.get('/videos', requireAuth, getSupportVideos);
 

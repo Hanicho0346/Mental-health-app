@@ -28,30 +28,27 @@ export function getSocket(): Socket | null {
 }
 
 export function initSocket(token?: string): Socket {
-  if (socket?.connected) return socket;
+  // ✅ Guard against any existing socket, not just connected ones
+  if (socket) {
+    if (socket.connected) return socket;
+    socket.disconnect();
+    socket = null;
+  }
 
   socket = io(SOCKET_URL, {
-    transports: ["polling", "websocket"],
+    transports: ["websocket"], // skip polling — it's slower and causes extra requests
     auth: token ? { token } : {},
     autoConnect: false,
     reconnection: true,
     reconnectionAttempts: 10,
     reconnectionDelay: 1000,
     timeout: 20000,
-    forceNew: true,
   });
+  // remove forceNew: true ← this was forcing duplicate sockets
 
-  socket.on("connect", () => {
-    console.log("[Socket] Connected:", socket.id);
-  });
-
-  socket.on("connect_error", (err) => {
-    console.log("[Socket] Connection error:", err.message);
-  });
-
-  socket.on("disconnect", (reason) => {
-    console.log("[Socket] Disconnected:", reason);
-  });
+  socket.on("connect", () => console.log("[Socket] Connected:", socket?.id));
+  socket.on("connect_error", (err) => console.log("[Socket] Error:", err.message));
+  socket.on("disconnect", (reason) => console.log("[Socket] Disconnected:", reason));
 
   return socket;
 }

@@ -28,6 +28,24 @@ type AuthState = {
   clearSession: () => Promise<void>;
 };
 
+let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleTokenRefresh(token: string) {
+  if (refreshTimer) clearTimeout(refreshTimer);
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    const msUntilExpiry = payload.exp * 1000 - Date.now();
+    const refreshAt = msUntilExpiry - 60_000; // 60s before expiry
+    if (refreshAt > 0) {
+      refreshTimer = setTimeout(() => {
+        // Call the api.ts refresh directly to avoid circular import
+        import('@/lib/api').then(({ refreshAccessToken }) => {
+          void refreshAccessToken();
+        });
+      }, refreshAt);
+    }
+  } catch {}
+}
 export const useAuthStore = create<AuthState>()(
   persist(
     (set) => ({
@@ -36,16 +54,18 @@ export const useAuthStore = create<AuthState>()(
       user: null,
       isPremier: false,                                      // ← NEW
       setIsPremier: (val) => set({ isPremier: val }),        // ← NEW
-      setSession: ({ accessToken, refreshToken, user }) =>
-        set((state) => ({
-          accessToken,
-          refreshToken: refreshToken ?? state.refreshToken ?? '',
-          user: user === undefined ? state.user : user,
-        })),
+     setSession: ({ accessToken, refreshToken, user }) => {
+  set((state) => ({
+    accessToken,
+    refreshToken: refreshToken ?? state.refreshToken ?? '',
+    user: user === undefined ? state.user : user,
+  }));
+  if (accessToken) scheduleTokenRefresh(accessToken); // ← add this
+},
+       
       clearSession: async () => {
         set({ accessToken: null, refreshToken: null, user: null, isPremier: false }); // ← reset on logout
-        await AsyncStorage.removeItem('token');
-        await AsyncStorage.removeItem('refreshToken');
+         await AsyncStorage.multiRemove(['token', 'refreshToken']);
       },
     }),
     {

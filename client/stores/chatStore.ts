@@ -113,42 +113,40 @@ export const useChatStore = create<ChatState>((set, get) => ({
     })),
 
   loadConversations: async (token: string) => {
-    try {
-      set({ loading: true });
+  try {
+    set({ loading: true });
+    
+    const response = await axios.get(`${API_URL}/api/messages/conversations`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    
+    if (response.data && Array.isArray(response.data)) {
+      const conversations: Conversation[] = response.data.map((conv: any) => ({
+        peerId:          conv.peerId          || conv.userId || conv._id,
+        peerName:        conv.peerName        || conv.full_name || conv.name || "User", // ← peerName first
+        lastMessage:     conv.lastMessage     || conv.last_message || "No messages yet",
+        lastMessageTime: conv.lastMessageTime || conv.last_message_time,
+        unreadCount:     conv.unreadCount     || conv.unread_count || 0,
+        isOnline:        conv.isOnline        || conv.is_online || false,
+      }));
       
-      const response = await axios.get(`${API_URL}/api/messages/conversations`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      set({ conversations });
+
+      const users: ChatUser[] = response.data.map((conv: any) => ({
+        _id:        conv.peerId    || conv.userId || conv._id,
+        full_name:  conv.peerName  || conv.full_name || conv.name || "User", // ← peerName first
+        is_online:  conv.isOnline  || conv.is_online || false,
+        avatar_url: conv.peerAvatar || conv.avatar || "",
+      }));
       
-      if (response.data && Array.isArray(response.data)) {
-        // Transform backend data to match Conversation type
-        const conversations: Conversation[] = response.data.map((conv: any) => ({
-          peerId: conv.userId || conv.peerId || conv._id,
-          peerName: conv.name || conv.full_name || conv.peerId,
-          lastMessage: conv.lastMessage || conv.last_message,
-          lastMessageTime: conv.lastMessageTime || conv.last_message_time,
-          unreadCount: conv.unreadCount || conv.unread_count || 0,
-          isOnline: conv.isOnline || conv.is_online || false,
-        }));
-        
-        set({ conversations });
-        
-        // Also update users list
-        const users: ChatUser[] = response.data.map((conv: any) => ({
-          _id: conv.userId || conv.peerId || conv._id,
-          full_name: conv.name || conv.full_name,
-          is_online: conv.isOnline || conv.is_online,
-          avatar_url: conv.avatar,
-        }));
-        
-        set({ users });
-      }
-    } catch (error) {
-      console.error("Error loading conversations:", error);
-    } finally {
-      set({ loading: false });
+      set({ users });
     }
-  },
+  } catch (error) {
+    console.error("Error loading conversations:", error);
+  } finally {
+    set({ loading: false });
+  }
+},
 
   clear: () =>
     set({

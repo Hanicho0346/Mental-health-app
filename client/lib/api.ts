@@ -36,7 +36,7 @@ const bareAuth = axios.create({
 
 let refreshPromise: Promise<string | null> | null = null;
 
-async function refreshAccessToken(): Promise<string | null> {
+export async function refreshAccessToken(): Promise<string | null> {
   const refreshToken = useAuthStore.getState().refreshToken;
   if (!refreshToken) return null;
   try {
@@ -62,8 +62,9 @@ async function refreshAccessToken(): Promise<string | null> {
   }
 }
 
-api.interceptors.request.use(async (config) => {
-  const token = useAuthStore.getState().accessToken ?? (await AsyncStorage.getItem('token'));
+// ✅ Synchronous — token should always be in the store after hydration
+api.interceptors.request.use((config) => {
+  const token = useAuthStore.getState().accessToken;
   if (token) config.headers.Authorization = `Bearer ${token}`;
   if (__DEV__) {
     logClientInfo('api.request', {

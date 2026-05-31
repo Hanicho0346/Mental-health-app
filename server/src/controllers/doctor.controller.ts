@@ -95,15 +95,11 @@ export async function getAppointmentsByDate(req: Request, res: Response): Promis
 }
 export async function getSupportVideos(req: Request, res: Response): Promise<void> {
   try {
-    const videos = await doctorService.getSupportVideos();
-
+    const videos = await doctorService.getSupportVideos(req.userId ?? undefined);
     res.status(200).json(videos);
   } catch (err) {
     console.error(err);
-
-    res.status(500).json({
-      message: 'Failed to fetch videos',
-    });
+    res.status(500).json({ message: 'Failed to fetch videos' });
   }
 }
 
@@ -178,5 +174,47 @@ export async function uploadSupportVideo(req: Request, res: Response): Promise<v
     res.status(500).json({
       message: err instanceof Error ? err.message : 'Failed to upload video',
     });
+  }
+}
+
+export async function incrementVideoListen(req: Request, res: Response): Promise<void> {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      res.status(400).json({ message: 'Invalid video id' });
+      return;
+    }
+    const video = await doctorService.incrementListen(id);
+    if (!video) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    res.status(200).json({ listens: video.listens });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Failed to update listen count' });
+  }
+}
+
+export async function toggleVideoFavorite(req: Request, res: Response): Promise<void> {
+  try {
+    if (!req.userId || !req.auth) {
+      unauthorized(res);
+      return;
+    }
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      res.status(400).json({ message: 'Invalid video id' });
+      return;
+    }
+    const result = await doctorService.toggleFavorite(id, req.userId);
+    if (!result) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    res.status(200).json({ isFavorite: result.isFavorite });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Failed to toggle favorite' });
   }
 }
