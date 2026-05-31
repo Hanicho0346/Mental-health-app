@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "Tesfa Mind App",
-    "slug": "mental-health-mobile",
+    "slug": "tesfa-mind",
     "jsEngine": "hermes",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -58,8 +58,9 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "b56dbc29-14ef-4022-bf7e-b2467bb3a829"
+        "projectId": "a1d849c2-f0a8-4b5e-9459-b5869784ef5d"
       }
-    }
+    },
+    "owner": "tesfa-mind"
   }
 }
