@@ -26,6 +26,8 @@ export const register: RequestHandler = async (req, res) => {
     medical_license?: string;
     specialization?: string;
     experience_years?: number;
+    hospital_or_clinic?: string;
+    certificate_url?: string;
   };
   try {
     const out = await authService.registerWithPassword(body, req);
@@ -159,4 +161,57 @@ export const updatePushToken: RequestHandler = async (req, res, next) => {
     await User.findByIdAndUpdate(req.userId, { push_token: push_token.trim() });
     res.json({ ok: true });
   } catch (err) { next(err); }
+};
+
+export const uploadCertificate: RequestHandler = async (req, res, next) => {
+  try {
+    const file = req.file;
+
+    // ── Debug logs (remove after confirming upload works) ──
+    console.log('[uploadCertificate] req.file:', file
+      ? { fieldname: file.fieldname, originalname: file.originalname, mimetype: file.mimetype, size: file.size, hasBuffer: !!file.buffer }
+      : 'MISSING');
+    console.log('[uploadCertificate] req.body:', req.body);
+    console.log('[uploadCertificate] req.email:', req.email);
+
+    if (!file) {
+      res.status(400).json({ error: 'No file uploaded. Send field name: "file"' });
+      return;
+    }
+
+    // Guard: buffer missing means multer is using disk storage, not memory
+    if (!file.buffer || file.buffer.length === 0) {
+      console.error('[uploadCertificate] file.buffer is empty — multer must use memoryStorage()');
+      res.status(500).json({ error: 'Server misconfiguration: file buffer unavailable' });
+      return;
+    }
+
+    const allowed = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg'];
+    if (!allowed.includes(file.mimetype)) {
+      res.status(400).json({ error: 'Only PDF, JPG, and PNG are allowed' });
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      res.status(400).json({ error: 'File too large. Maximum 10 MB' });
+      return;
+    }
+
+    const email = req.email ?? (req.body as { email?: string })?.email ?? '';
+    if (!email) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const result = await authService.uploadDocument({
+      email,
+      fileBuffer: file.buffer,
+      mimeType: file.mimetype,
+    });
+
+    res.status(200).json(result);
+  } catch (err) {
+    console.error('[uploadCertificate] unexpected error:', err);
+    handleAuthError(res, err, 'Certificate upload');
+  }
 };

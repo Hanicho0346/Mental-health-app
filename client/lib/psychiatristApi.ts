@@ -30,7 +30,7 @@ export type DocumentType = 'profile' | 'psychiatrist_doc' | 'wellness_video';
 // Fetch full profile - No userId parameter needed for current user
 export const fetchPsychiatristFullProfile = async () => {
   try {
-    const response = await api.get('/appointments/counselors');
+    const response = await api.get('/users/me');
     return response.data;
   } catch (error) {
     console.error('Error fetching psychiatrist profile:', error);

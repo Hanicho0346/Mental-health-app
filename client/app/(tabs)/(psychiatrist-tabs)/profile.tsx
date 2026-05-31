@@ -189,9 +189,9 @@ useFocusEffect(
 function OverviewTab({ profile }: { profile: any }) {
   return (
     <>
-      {/* Personal Information */}
+      {/* ── Professional Information ── */}
       <View style={s.section}>
-        <ProfileInfoCard title="Personal Information" icon="briefcase">
+        <ProfileInfoCard title="Professional Information" icon="briefcase">
           <InfoRow
             label="Specialization"
             value={profile?.specialization || "—"}
@@ -204,7 +204,11 @@ function OverviewTab({ profile }: { profile: any }) {
           />
           <InfoRow
             label="Experience"
-            value={`${profile?.years_of_experience ?? 0} yrs`}
+            value={
+              profile?.years_of_experience
+                ? `${profile.years_of_experience} years`
+                : "—"
+            }
             icon="award"
           />
           <InfoRow
@@ -215,13 +219,36 @@ function OverviewTab({ profile }: { profile: any }) {
         </ProfileInfoCard>
       </View>
 
-      {/* Verification Status */}
+      {/* ── Contact Information ── */}
+      <View style={s.section}>
+        <ProfileInfoCard title="Contact Information" icon="phone">
+          <InfoRow
+            label="Email"
+            value={profile?.email || "—"}
+            icon="mail"
+          />
+          <InfoRow
+            label="National ID"
+            value={profile?.national_id || "—"}
+            icon="credit-card"
+          />
+          <InfoRow
+            label="Phone"
+            value={profile?.phone || "—"}
+            icon="phone"
+          />
+        </ProfileInfoCard>
+      </View>
+
+      {/* ── Verification Status ── */}
       <View style={s.section}>
         <ProfileInfoCard title="Verification Status" icon="shield">
           <View style={s.statusRow}>
             <View>
               <Text style={s.statusLabel}>Current status</Text>
-              <Text style={s.statusValue}>{profile?.verification_status}</Text>
+              <Text style={s.statusValue}>
+                {profile?.verification_status ?? "—"}
+              </Text>
             </View>
             {profile?.verification_status && (
               <StatusBadge
@@ -260,7 +287,7 @@ function OverviewTab({ profile }: { profile: any }) {
         </ProfileInfoCard>
       </View>
 
-      {/* Account Information */}
+      {/* ── Account Information ── */}
       <View style={s.section}>
         <View style={s.card}>
           <Text style={s.cardTitle}>Account Information</Text>
@@ -276,14 +303,24 @@ function OverviewTab({ profile }: { profile: any }) {
                 : "—"}
             </Text>
           </View>
+          <View style={s.accountRow}>
+            <Text style={s.accountLabel}>Role</Text>
+            <Text style={s.accountValue} style={{ textTransform: "capitalize" }}>
+              {profile?.role ?? "Psychiatrist"}
+            </Text>
+          </View>
           <View style={[s.accountRow, { borderBottomWidth: 0 }]}>
             <Text style={s.accountLabel}>Account ID</Text>
-            <Text style={s.accountValue}>{profile?.id?.slice(0, 8)}...</Text>
+            <Text style={s.accountValue}>
+              {profile?.id ? `${profile.id.slice(0, 8)}…` : "—"}
+            </Text>
           </View>
         </View>
       </View>
 
-      {/* Action */}
+     
+
+      {/* ── Action ── */}
       {profile?.verification_status === "approved" ? (
         <TouchableOpacity
           style={s.actionBtn}
@@ -417,7 +454,30 @@ const s = StyleSheet.create({
     borderColor: "#BBF7D0",
   },
   specTagText: { fontSize: 12, color: "#166534" },
-
+statsRow: {
+  flexDirection: "row",
+  gap: 10,
+},
+statCard: {
+  flex: 1,
+  backgroundColor: "#FFFFFF",
+  borderRadius: 14,
+  paddingVertical: 16,
+  alignItems: "center",
+  gap: 6,
+  borderWidth: StyleSheet.hairlineWidth,
+  borderColor: "#E5E7EB",
+},
+statValue: {
+  fontSize: 20,
+  fontWeight: "800",
+  color: "#111827",
+},
+statLabel: {
+  fontSize: 11,
+  color: "#6B7280",
+  fontWeight: "500",
+},
   // Tabs
   tabBar: {
     flexDirection: "row",
