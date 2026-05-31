@@ -2,7 +2,7 @@ import type { RequestHandler } from 'express';
 import mongoose from 'mongoose';
 
 import { User } from '../models/User.js';
-import { AiChatMessage } from '../models/AIchatmessage.js';
+import { AiChatMessage } from '../models/AiChatMessage.js';
 import { SYSTEM_PROMPT } from '../utils/aiSystemPrompt.js';
 import { logServerError } from '../utils/logger.js';
 
