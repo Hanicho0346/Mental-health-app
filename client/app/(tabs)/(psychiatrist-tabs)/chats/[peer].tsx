@@ -72,7 +72,8 @@ export default function PsychiatristDirectChatScreen() {
   // NOTE: if bubbles still appear on the wrong side, check what field
   // chatStore.me uses. It must match the sender_id field coming back from
   // /api/messages. Common mismatch: store uses _id but component reads userId.
-  const currentUserId = me?.userId;
+  // In PsychiatristDirectChatScreen:
+  const currentUserId = me?._id ?? me?.userId;
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState("");
@@ -149,13 +150,6 @@ export default function PsychiatristDirectChatScreen() {
         timeout: 10000,
       });
       if (Array.isArray(data)) {
-        // FIX-A: spread the message as-is (same as user chat).
-        // The API already returns sender_id / receiver_id / created_at.
-        // The old mapping (m.from → sender_id, m.timestamp → created_at)
-        // was only needed if the API returns a different shape — if your
-        // /api/messages endpoint returns { from, to, timestamp } you must
-        // keep the old mapping. Check your API response and use whichever
-        // branch matches. The user chat uses the spread, so mirroring it:
         setMessages(data.map((m: any) => ({ ...m, status: "sent" as const })));
         tempMessageIds.current.clear();
         setTimeout(
@@ -188,7 +182,7 @@ export default function PsychiatristDirectChatScreen() {
 
     const optimistic: Message = {
       id: tempId,
-      sender_id: currentUserId ?? "me",
+      sender_id: currentUserId ?? "",
       receiver_id: peerId,
       content,
       created_at: new Date().toISOString(),
