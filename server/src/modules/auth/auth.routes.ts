@@ -8,6 +8,7 @@ import {
   resendVerification,
   resetPassword,
   verifyEmail,
+  updatePushToken,
 } from './auth.controller.js';
 import { authRateLimiter } from '../../middleware/rateLimit.js';
 import { validateBody } from '../../middleware/validateRequest.js';
@@ -21,6 +22,7 @@ import {
   resetPasswordSchema,
   verifyEmailSchema,
 } from '../../validators/auth.schemas.js';
+import { requireAuth } from '../../middleware/authenticate.js';
 
 const router = Router();
 
@@ -28,6 +30,8 @@ const authLimiter = authRateLimiter();
 
 router.post('/register', authLimiter, validateBody(registerSchema), register);
 router.post('/login', authLimiter, validateBody(loginSchema), login);
+// authRoutes.ts
+router.patch('/push-token', requireAuth, updatePushToken);
 router.post('/refresh', authLimiter, validateBody(refreshSchema), refresh);
 router.post('/logout', authLimiter, validateBody(logoutSchema), logout);
 router.post('/verify-email', authLimiter, validateBody(verifyEmailSchema), verifyEmail);

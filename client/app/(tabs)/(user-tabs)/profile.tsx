@@ -5,6 +5,7 @@ import { Feather } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useState } from "react";
 import { useClerk } from "@clerk/clerk-expo";
+import { UpgradeModal } from '@/components/UpgradeModal';
 import {
   Alert,
   Modal,
@@ -24,6 +25,7 @@ import Svg, {
   Path,
   Stop,
 } from "react-native-svg";
+import { useAuthStore } from "@/stores/authStore";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -155,195 +157,9 @@ function fmtDate(iso: string): string {
 
 // ─── Upgrade Modal ────────────────────────────────────────────────────────────
 
-type UpgradeModalProps = {
-  visible: boolean;
-  onClose: () => void;
-  onSuccess: () => void;
-};
 
-function UpgradeModal({ visible, onClose, onSuccess }: UpgradeModalProps) {
-  const [tab, setTab] = useState<"premier" | "student">("premier");
-  const [studentId, setStudentId] = useState("");
-  const [studentEmail, setStudentEmail] = useState("");
-  const [loading, setLoading] = useState(false);
 
-  async function handlePremierSubscribe() {
-    setLoading(true);
-    try {
-      await api.post("/subscriptions/premier");
-      Alert.alert("🎉 Welcome to Premier!", "You now have full access.");
-      onSuccess();
-      onClose();
-    } catch (e) {
-      Alert.alert("Subscription failed", getApiErrorMessage(e));
-    } finally {
-      setLoading(false);
-    }
-  }
 
-  async function handleStudentVerify() {
-    if (!studentId.trim() && !studentEmail.trim()) {
-      Alert.alert("Required", "Please enter your student ID or .edu email.");
-      return;
-    }
-    setLoading(true);
-    try {
-      await api.post("/subscriptions/student-verify", {
-        student_id: studentId.trim() || undefined,
-        student_email: studentEmail.trim() || undefined,
-      });
-      Alert.alert(
-        "✅ Student Verified!",
-        "Your student discount has been applied."
-      );
-      onSuccess();
-      onClose();
-    } catch (e) {
-      Alert.alert("Verification failed", getApiErrorMessage(e));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      transparent
-      onRequestClose={onClose}
-    >
-      <View style={modalStyles.overlay}>
-        <View style={modalStyles.sheet}>
-          {/* Header */}
-          <View style={modalStyles.sheetHeader}>
-            <Text style={modalStyles.sheetTitle}>Unlock Premier Access</Text>
-            <TouchableOpacity onPress={onClose}>
-              <Feather name="x" size={22} color="#6B7280" />
-            </TouchableOpacity>
-          </View>
-          <Text style={modalStyles.sheetSubtitle}>
-            Choose how you'd like to upgrade
-          </Text>
-
-          {/* Tabs */}
-          <View style={modalStyles.tabs}>
-            <TouchableOpacity
-              style={[modalStyles.tab, tab === "premier" && modalStyles.tabActive]}
-              onPress={() => setTab("premier")}
-            >
-              <Feather
-                name="star"
-                size={14}
-                color={tab === "premier" ? "#B45309" : "#9CA3AF"}
-              />
-              <Text
-                style={[
-                  modalStyles.tabText,
-                  tab === "premier" && modalStyles.tabTextActive,
-                ]}
-              >
-                Premier
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[modalStyles.tab, tab === "student" && modalStyles.tabActive]}
-              onPress={() => setTab("student")}
-            >
-              <Feather
-                name="book-open"
-                size={14}
-                color={tab === "student" ? "#1D4ED8" : "#9CA3AF"}
-              />
-              <Text
-                style={[
-                  modalStyles.tabText,
-                  tab === "student" && modalStyles.tabTextActiveBlue,
-                ]}
-              >
-                Student Discount
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Benefits list */}
-          <View style={modalStyles.benefits}>
-            {[
-              { icon: "message-circle", text: "Unlimited free AI chat sessions" },
-              { icon: "zap", text: "Daily streak tracking & rewards" },
-              { icon: "users", text: "Access to group chats & community" },
-            ].map((b) => (
-              <View key={b.text} style={modalStyles.benefitRow}>
-                <View style={modalStyles.benefitIcon}>
-                  <Feather name={b.icon as any} size={15} color="#16A34A" />
-                </View>
-                <Text style={modalStyles.benefitText}>{b.text}</Text>
-              </View>
-            ))}
-          </View>
-
-          {/* Tab content */}
-          {tab === "premier" ? (
-            <View>
-              <View style={modalStyles.priceBox}>
-                <Text style={modalStyles.price}>ETB 199</Text>
-                <Text style={modalStyles.pricePer}>/month</Text>
-              </View>
-              <TouchableOpacity
-                style={[modalStyles.ctaBtn, { backgroundColor: "#B45309" }]}
-                onPress={handlePremierSubscribe}
-                disabled={loading}
-              >
-                {loading ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={modalStyles.ctaBtnText}>
-                    Subscribe to Premier
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <View>
-              <Text style={modalStyles.inputLabel}>Student ID</Text>
-              <TextInput
-                style={modalStyles.input}
-                placeholder="e.g. STU-2024-001"
-                value={studentId}
-                onChangeText={setStudentId}
-                placeholderTextColor="#9CA3AF"
-              />
-              <Text style={modalStyles.inputLabel}>
-                Or .edu / University Email
-              </Text>
-              <TextInput
-                style={modalStyles.input}
-                placeholder="you@university.edu.et"
-                value={studentEmail}
-                onChangeText={setStudentEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                placeholderTextColor="#9CA3AF"
-              />
-              <TouchableOpacity
-                style={[modalStyles.ctaBtn, { backgroundColor: "#1D4ED8" }]}
-                onPress={handleStudentVerify}
-                disabled={loading}
-              >
-                {loading ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={modalStyles.ctaBtnText}>
-                    Verify Student Status
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          )}
-        </View>
-      </View>
-    </Modal>
-  );
-}
 
 // ─── Premier Benefits Card ────────────────────────────────────────────────────
 
@@ -420,7 +236,7 @@ function PremierCard({
         {/* AI Chat */}
         <TouchableOpacity
           style={premierStyles.pill}
-          onPress={() => router.push("/ai-chat")}
+          onPress={() => router.push("/aichat")}
         >
           <View style={[premierStyles.pillIcon, { backgroundColor: "#F0FDF4" }]}>
             <Feather name="message-circle" size={16} color="#16A34A" />
@@ -460,7 +276,7 @@ function PremierCard({
         {/* Group Chats */}
         <TouchableOpacity
           style={premierStyles.pill}
-          onPress={() => router.push("/group-chats")}
+          onPress={() => router.push("/groupchats")}
         >
           <View style={[premierStyles.pillIcon, { backgroundColor: "#EDE9FE" }]}>
             <Feather name="users" size={16} color="#7C3AED" />
@@ -491,6 +307,8 @@ export default function ProfileScreen() {
       ]);
       if (!cancelled.value) {
         setMe(meRes.data);
+       
+useAuthStore.getState().setIsPremier(meRes.data.is_premier ?? false);
         setAppointments(apptRes.data);
         setWallet(walletRes.data);
       }

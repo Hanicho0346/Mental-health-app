@@ -73,6 +73,8 @@ export default function LoginScreen() {
 
       useChatStore.getState().setMe({
         _id: user.id,
+        userId: user.id,
+        username: user.full_name,
         full_name: user.full_name,
         email: user.email,
       });

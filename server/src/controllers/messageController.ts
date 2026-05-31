@@ -5,6 +5,7 @@ import { User } from '../models/User.js';
 import { Conversation } from '../models/Conversation.js';
 import { ChatMessage } from '../models/ChatMessage.js';
 import { logServerError } from '../utils/logger.js';
+import { notifyNewMessage, emitNotificationToUser, sendNotification } from '../services/notification.service.js';
 
 function getIo(req: Parameters<RequestHandler>[0]): IOServer | undefined {
   return req.app.get('io') as IOServer | undefined;
@@ -205,13 +206,18 @@ export const createMessage: RequestHandler = async (req, res) => {
       content:         content.trim(),
     });
 
-    const payload = {
+const payload = {
       id:          message._id.toString(),
       sender_id:   req.userId,
       receiver_id,
       content:     message.content,
       created_at:  message.timestamp,
     };
+
+    const [sender, recipient] = await Promise.all([
+      User.findById(req.userId).select('full_name role').lean(),
+      User.findById(receiver_id).select('role').lean(),
+    ]);
 
     const io = getIo(req);
     if (io) {
@@ -222,9 +228,31 @@ export const createMessage: RequestHandler = async (req, res) => {
       // (covers the case where a socket hasn't joined the conv room yet)
       io.to(roomForUser(req.userId)).emit('message:new', payload);
       io.to(roomForUser(receiver_id)).emit('message:new', payload);
+
+      // Emit notification to socket room for real-time updates
+      if (sender && recipient) {
+        void emitNotificationToUser(io, receiver_id, {
+          id: message._id.toString(),
+          type: 'new_message',
+          title: `💬 ${sender.full_name ?? 'Someone'}`,
+          body: (content as string).slice(0, 100),
+          is_read: false,
+          created_at: message.timestamp,
+          data: { chat_id: conversation._id.toString() },
+        });
+      }
     }
 
     res.status(201).json(payload);
+    if (sender && recipient) {
+      void notifyNewMessage({
+        recipientId:    receiver_id,
+        recipientRole:  (recipient.role ?? 'user') as 'user' | 'psychiatrist',
+        senderName:     sender.full_name ?? 'Someone',
+        messagePreview: (content as string).slice(0, 100),
+        chatId:         conversation._id.toString(),
+      });
+    }
   } catch (err) {
     logServerError('createMessage', err, { userId: req.userId });
     res.status(500).json({ error: 'Failed to send message' });

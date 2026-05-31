@@ -22,6 +22,8 @@ type AuthState = {
   accessToken: string | null;
   refreshToken: string | null;
   user: AuthUser | null;
+  isPremier: boolean;                          // ← NEW
+  setIsPremier: (val: boolean) => void;        // ← NEW
   setSession: (p: { accessToken: string; refreshToken: string; user?: AuthUser | null }) => void;
   clearSession: () => Promise<void>;
 };
@@ -32,6 +34,8 @@ export const useAuthStore = create<AuthState>()(
       accessToken: null,
       refreshToken: null,
       user: null,
+      isPremier: false,                                      // ← NEW
+      setIsPremier: (val) => set({ isPremier: val }),        // ← NEW
       setSession: ({ accessToken, refreshToken, user }) =>
         set((state) => ({
           accessToken,
@@ -39,7 +43,7 @@ export const useAuthStore = create<AuthState>()(
           user: user === undefined ? state.user : user,
         })),
       clearSession: async () => {
-        set({ accessToken: null, refreshToken: null, user: null });
+        set({ accessToken: null, refreshToken: null, user: null, isPremier: false }); // ← reset on logout
         await AsyncStorage.removeItem('token');
         await AsyncStorage.removeItem('refreshToken');
       },
@@ -51,6 +55,7 @@ export const useAuthStore = create<AuthState>()(
         accessToken: s.accessToken,
         refreshToken: s.refreshToken,
         user: s.user,
+        isPremier: s.isPremier,   // ← persist so tab survives app restarts
       }),
     }
   )

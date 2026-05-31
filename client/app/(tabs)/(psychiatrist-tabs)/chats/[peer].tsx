@@ -51,8 +51,7 @@ import { getSocket } from "@/lib/socket";
 import { useChatStore } from "@/stores/chatStore";
 import { useAuth } from "@clerk/clerk-expo";
 import axios from "axios";
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL;
+import { API_URL } from "@/lib/api";
 
 type Message = {
   id: string;
@@ -246,8 +245,8 @@ export default function PsychiatristDirectChatScreen() {
     };
 
     const onReceiveMessage = (msg: any) => {
-      const senderId = msg.from?.toString?.() ?? msg.from;
-      const receiverId = msg.to?.toString?.() ?? msg.to;
+      const senderId = msg.sender_id?.toString?.() ?? msg.from;
+      const receiverId = msg.receiver_id?.toString?.() ?? msg.to;
       if (senderId !== peerId && receiverId !== peerId) return;
       setMessages((prev) => {
         const id = msg._id?.toString() ?? msg.id;
@@ -259,7 +258,7 @@ export default function PsychiatristDirectChatScreen() {
             sender_id: senderId,
             receiver_id: receiverId,
             content: msg.content,
-            created_at: msg.timestamp ?? new Date().toISOString(),
+            created_at: msg.created_at ?? msg.timestamp ?? new Date().toISOString(),
             status: "sent" as const,
           },
         ];

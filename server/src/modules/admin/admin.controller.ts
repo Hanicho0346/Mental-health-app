@@ -11,6 +11,7 @@ import {
   listAllBookings,
   listAllWalletTransactions,
 } from '../../controllers/booking.service.js';
+import { notifyPsychiatristApproved, notifyPsychiatristRejected } from '../../services/notification.service.js';
 
 const reviewSchema = z.object({
   feedback: z.string().max(1000).optional(),
@@ -28,8 +29,20 @@ export const listPendingPsychiatrists: RequestHandler = async (_req, res, next) 
 export const approvePsychiatrist: RequestHandler = async (req, res, next) => {
   try {
     if (!req.userId) { res.status(401).json({ error: 'Unauthorized' }); return; }
+
+    const psychiatristId = req.params.id!;
     const { feedback } = reviewSchema.parse(req.body);
-    const result = await reviewPsychiatrist(req.userId, req.params.id!, 'approved', feedback);
+
+    const psychiatrist = await User.findById(psychiatristId).select('full_name').lean();
+    if (!psychiatrist) { res.status(404).json({ error: 'Psychiatrist not found' }); return; }
+
+    const result = await reviewPsychiatrist(req.userId, psychiatristId, 'approved', feedback);
+
+    void notifyPsychiatristApproved({
+      psychiatristId,
+      psychiatristName: psychiatrist.full_name,
+    });
+
     res.json(result);
   } catch (err) { next(err); }
 };
@@ -37,12 +50,26 @@ export const approvePsychiatrist: RequestHandler = async (req, res, next) => {
 export const rejectPsychiatrist: RequestHandler = async (req, res, next) => {
   try {
     if (!req.userId) { res.status(401).json({ error: 'Unauthorized' }); return; }
+
+    const psychiatristId = req.params.id!;
     const { feedback } = reviewSchema.parse(req.body);
+
     if (!feedback?.trim()) {
       res.status(400).json({ error: 'Feedback is required when rejecting' });
       return;
     }
-    const result = await reviewPsychiatrist(req.userId, req.params.id!, 'rejected', feedback);
+
+    const psychiatrist = await User.findById(psychiatristId).select('full_name').lean();
+    if (!psychiatrist) { res.status(404).json({ error: 'Psychiatrist not found' }); return; }
+
+    const result = await reviewPsychiatrist(req.userId, psychiatristId, 'rejected', feedback);
+
+    void notifyPsychiatristRejected({
+      psychiatristId,
+      psychiatristName: psychiatrist.full_name,
+      reason: feedback.trim(),
+    });
+
     res.json(result);
   } catch (err) { next(err); }
 };

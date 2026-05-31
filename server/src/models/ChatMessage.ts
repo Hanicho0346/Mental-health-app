@@ -45,9 +45,10 @@ const chatMessageSchema = new Schema({
     default: Date.now,
   },
 
-  read: {
+  is_read: {
     type: Boolean,
     default: false,
+    index: true,
   },
 
   clientId: {

@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { User } from '../models/User.js';
 import { ChatMessage } from '../models/ChatMessage.js';
+import { Conversation } from '../models/Conversation.js';
 
 export type MessagePayload = {
   id: string;
@@ -15,7 +16,7 @@ export async function persistMessage(
   receiverIdStr: string,
   content: string
 ): Promise<
-  | { ok: true; message: MessagePayload }
+  | { ok: true; message: MessagePayload; conversationId: string }
   | { ok: false; status: number; error: string }
 > {
 
@@ -57,7 +58,27 @@ export async function persistMessage(
     };
   }
 
+  // Conversation gate: must have active paid session
+  const conversation = await Conversation.findOne({
+    participants: {
+      $all: [
+        new mongoose.Types.ObjectId(senderIdStr),
+        new mongoose.Types.ObjectId(receiverIdStr),
+      ],
+    },
+    status: 'active',
+  });
+
+  if (!conversation) {
+    return {
+      ok: false,
+      status: 403,
+      error: 'No active paid session. Book and pay to unlock chat.',
+    };
+  }
+
   const doc = await ChatMessage.create({
+    conversation_id: conversation._id,
     from: new mongoose.Types.ObjectId(senderIdStr),
 
     to: new mongoose.Types.ObjectId(receiverIdStr),
@@ -66,7 +87,7 @@ export async function persistMessage(
 
     type: 'text',
 
-    read: false,
+    is_read: false,
   });
 
   return {
@@ -83,5 +104,6 @@ export async function persistMessage(
 
       created_at: doc.timestamp,
     },
+    conversationId: conversation._id.toString(),
   };
 }

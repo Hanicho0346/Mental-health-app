@@ -16,6 +16,11 @@ export type MeProfileDto = {
   is_approved: boolean;
   admin_feedback: string;
   hospital_or_clinic: string;
+  // ── Premier / subscription fields ──
+  is_premier: boolean;
+  premier_expires_at: string | null;
+  subscription_tier: string;
+  ai_chats_daily_limit: number | null;
 };
 
 export async function getMeProfile(userId: string): Promise<MeProfileDto> {
@@ -23,6 +28,12 @@ export async function getMeProfile(userId: string): Promise<MeProfileDto> {
   if (!user) {
     throw new AppError(404, 'User not found');
   }
+
+  // Derive live premier status: flag must be true AND not expired
+  const rawExpiry: Date | null = (user as any).premier_expires_at ?? null;
+  const isExpired = rawExpiry !== null && new Date(rawExpiry) < new Date();
+  const isPremier = ((user as any).is_premier === true) && !isExpired;
+
   return {
     id: user._id.toString(),
     full_name: user.full_name,
@@ -39,6 +50,11 @@ export async function getMeProfile(userId: string): Promise<MeProfileDto> {
       (user.role === 'psychiatrist' ? user.verification_status === 'approved' : true),
     admin_feedback: user.admin_feedback ?? '',
     hospital_or_clinic: user.hospital_or_clinic ?? '',
+    // ── Premier fields ──
+    is_premier: isPremier,
+    premier_expires_at: rawExpiry ? rawExpiry.toISOString() : null,
+    subscription_tier: (user as any).subscription_tier ?? 'free',
+    ai_chats_daily_limit: (user as any).ai_chats_daily_limit ?? null,
   };
 }
 
@@ -87,6 +103,11 @@ export async function patchMeProfile(
   if (!user) {
     throw new AppError(404, 'User not found');
   }
+
+  const rawExpiry: Date | null = (user as any).premier_expires_at ?? null;
+  const isExpired = rawExpiry !== null && new Date(rawExpiry) < new Date();
+  const isPremier = ((user as any).is_premier === true) && !isExpired;
+
   return {
     id: user._id.toString(),
     full_name: user.full_name,
@@ -103,5 +124,10 @@ export async function patchMeProfile(
       (user.role === 'psychiatrist' ? user.verification_status === 'approved' : true),
     admin_feedback: user.admin_feedback ?? '',
     hospital_or_clinic: user.hospital_or_clinic ?? '',
+    // ── Premier fields ──
+    is_premier: isPremier,
+    premier_expires_at: rawExpiry ? rawExpiry.toISOString() : null,
+    subscription_tier: (user as any).subscription_tier ?? 'free',
+    ai_chats_daily_limit: (user as any).ai_chats_daily_limit ?? null,
   };
 }
