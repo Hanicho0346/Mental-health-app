@@ -13,7 +13,9 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import * as DocumentPicker from "expo-document-picker";
 import { resolvePostAuthRoute } from "@/lib/sessionRouting";
+import { api } from "@/lib/api";
 
 type Role = "user" | "psychiatrist" | null;
 type Step = 1 | 2 | 3;
@@ -39,6 +41,44 @@ export default function RegisterScreen() {
   const [specialization, setSpecialization] = useState("");
   const [experience, setExperience] = useState("");
   const [certificateUploaded, setCertificateUploaded] = useState(false);
+  const [certificateUrl, setCertificateUrl] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+
+  // ── Certificate upload ──────────────────────────────────────────────────
+  async function handleCertificateUpload(): Promise<void> {
+    try {
+      // Try document picker first (supports PDF + images)
+      const docResult = await DocumentPicker.getDocumentAsync({
+        type: ["application/pdf", "image/jpeg", "image/png", "image/jpg"],
+        copyToCacheDirectory: true,
+      });
+
+      if (docResult.canceled || !docResult.assets?.[0]) return;
+
+      const asset = docResult.assets[0];
+      const formData = new FormData();
+      formData.append("file", {
+        uri: asset.uri,
+        name: asset.name ?? "certificate.pdf",
+        type: asset.mimeType ?? "application/pdf",
+      } as any);
+      formData.append("email", email.trim());
+
+      setUploading(true);
+      const { data } = await api.post<{ ok: boolean; url: string }>(
+        "/auth/upload/certificate",
+        formData,
+        { headers: { "Content-Type": "multipart/form-data" } }
+      );
+
+      setCertificateUrl(data.url);
+      setCertificateUploaded(true);
+    } catch (e: any) {
+      Alert.alert("Upload failed", e.message ?? "Could not upload certificate.");
+    } finally {
+      setUploading(false);
+    }
+  }
 
   async function handleRegister(): Promise<void> {
     if (!isLoaded || submitting) return;
@@ -66,6 +106,9 @@ export default function RegisterScreen() {
         unsafeMetadata: {
           role,
           national_id: nationalId.trim(),
+          ...(role === "psychiatrist" && certificateUrl
+            ? { certificate_url: certificateUrl }
+            : {}),
         },
       });
 
@@ -138,6 +181,7 @@ export default function RegisterScreen() {
               medical_license: licenseNumber.trim(),
               specialization: specialization.trim(),
               experience_years: parseInt(experience, 10) || 0,
+              // ...(certificateUrl ? { certificate_url: certificateUrl } : {}),
             }
           : {
               role: "user" as const,
@@ -434,15 +478,22 @@ export default function RegisterScreen() {
 
               <TouchableOpacity
                 style={s.uploadBox}
-                onPress={() => setCertificateUploaded(!certificateUploaded)}
+                onPress={() => void handleCertificateUpload()}
+                disabled={uploading}
               >
-                <Feather
-                  name="upload-cloud"
-                  size={28}
-                  color={certificateUploaded ? "#4ADE80" : "#9CA3AF"}
-                />
+                {uploading ? (
+                  <ActivityIndicator color="#4ADE80" />
+                ) : (
+                  <Feather
+                    name="upload-cloud"
+                    size={28}
+                    color={certificateUploaded ? "#4ADE80" : "#9CA3AF"}
+                  />
+                )}
                 <Text style={[s.uploadText, certificateUploaded && { color: "#4ADE80" }]}>
-                  {certificateUploaded
+                  {uploading
+                    ? "Uploading..."
+                    : certificateUploaded
                     ? "Certificate Uploaded Successfully"
                     : "Tap to upload medical certificate (PDF/JPG)"}
                 </Text>

@@ -1,7 +1,7 @@
 import { api } from "@/lib/api";
 import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   Image,
   ScrollView,
@@ -48,7 +48,7 @@ export default function CalendarScreen() {
   const [appointments, setAppointments] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-
+const hasFetched = useRef(false);
   // --- API FETCH ---
   const fetchAppointments = async (date: string) => {
     try {
@@ -72,6 +72,8 @@ export default function CalendarScreen() {
   // Re-fetch when the selected date changes
   useEffect(() => {
     setIsLoading(true);
+     if (hasFetched.current) return;
+  hasFetched.current = true;
     fetchAppointments(selectedDate);
   }, [selectedDate]);
 

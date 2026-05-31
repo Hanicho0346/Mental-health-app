@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "Mental Health App",
+    "name": "Tesfa Mind App",
     "slug": "mental-health-mobile",
     "jsEngine": "hermes",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/image.png",
     "scheme": "mental-health-mobile",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,

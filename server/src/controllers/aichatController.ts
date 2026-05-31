@@ -45,9 +45,9 @@ export const sendMessage: RequestHandler = async (req, res) => {
       parts: [{ text: message.trim() }],
     });
 
-    // ↓ upgraded from gemini-1.5-flash to gemini-2.0-flash (still free)
+    // gemini-3.5-flash: current free-tier model (1.5-flash blocked for new projects since Apr 2025)
     const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -62,7 +62,26 @@ export const sendMessage: RequestHandler = async (req, res) => {
 
     if (!geminiRes.ok) {
       const errBody = await geminiRes.text();
-      logServerError('aiChat.gemini', errBody);
+      logServerError('aiChat.gemini', { errorMessage: errBody });
+
+      if (geminiRes.status === 429) {
+        res.status(503).json({
+          error:
+            'Dr. Selam is resting right now. Please try again in a few minutes. 🌙',
+          retry_after: 60,
+        });
+        return;
+      }
+
+      if (geminiRes.status === 404) {
+        // Model not found — likely API key doesn't have access to this model
+        logServerError('aiChat.gemini.modelNotFound', {
+          hint: 'Check your Gemini API key and ensure the model is available for your project',
+        });
+        res.status(502).json({ error: 'AI model unavailable' });
+        return;
+      }
+
       res.status(502).json({ error: 'AI unavailable' });
       return;
     }
@@ -95,7 +114,6 @@ export const sendMessage: RequestHandler = async (req, res) => {
       }),
     ]);
 
-    // ↓ now returns usage so the frontend UsageBar works
     res.json({
       response: aiResponse,
       usage: {

@@ -31,6 +31,8 @@ const videoSchema = new Schema(
       type: String,
       required: true,
     },
+    listens:      { type: Number, default: 0 },                              // ADD
+    favorites:    [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   },
   {
     timestamps: true,

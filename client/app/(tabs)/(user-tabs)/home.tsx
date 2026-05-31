@@ -7,6 +7,7 @@ import { connectSocket } from "@/lib/chatService";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useState } from "react";
+import { Video, ResizeMode } from "expo-av";
 import {
   ActivityIndicator,
   Image,
@@ -20,6 +21,9 @@ import {
   FlatList,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import image1 from "../../../assets/images/image.png";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 type Feeling = "happy" | "neutral" | "sad";
 
@@ -44,34 +48,72 @@ type MeResponse = {
   avatar_url?: string;
   mood_status?: string;
   createdAt?: string;
+  is_premier?: boolean;
+  ai_chats_used_today?: number;
+  ai_chats_daily_limit?: number | null;
 };
 
-// Represents the Video Model from your Backend
+type NextAppointment = {
+  id: string;
+  counselor_name: string;
+  specialization?: string;
+  scheduled_at: string;
+};
+
 type SupportVideo = {
   id: string;
   title: string;
-  amharicTitle: string;
+  category: string;
+  amharic_title: string;
   tag: string;
   listens: number;
   thumbnail: string;
   video_url: string;
-  isFavorite?: boolean; // Backend should return true if the current user favorited it
+  isFavorite?: boolean;
 };
 
-const DEFAULT_AVATAR =
-  "https://images.unsplash.com/photo-1531123897727-8f129e1bf98c?w=100&h=100&fit=crop";
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function formatAppointmentDate(iso: string): string {
+  try {
+    return new Date(iso).toLocaleDateString(undefined, {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+    });
+  } catch {
+    return "";
+  }
+}
+
+function formatAppointmentTime(iso: string): string {
+  try {
+    return new Date(iso).toLocaleTimeString(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return "";
+  }
+}
+
+// ─── Main Screen ──────────────────────────────────────────────────────────────
 
 export default function HomeScreen() {
   const psychiatrist = isPsychiatrist(useAuthStore((s) => s.user));
 
-  // Profile & Mood States
   const [me, setMe] = useState<MeResponse | null>(null);
   const [feeling, setFeeling] = useState<Feeling>("happy");
   const [moodSaving, setMoodSaving] = useState(false);
   const [hasSubmittedFeeling, setHasSubmittedFeeling] = useState(false);
   const [profileLoading, setProfileLoading] = useState(true);
+  const [playingVideo, setPlayingVideo] = useState<SupportVideo | null>(null);
+  // 2. Add setIsPremier selector at the top of HomeScreen()
+  const setIsPremier = useAuthStore((s) => s.setIsPremier);
+  const [nextAppointment, setNextAppointment] =
+    useState<NextAppointment | null>(null);
+  const [appointmentLoading, setAppointmentLoading] = useState(true);
 
-  // Video States
   const [videos, setVideos] = useState<SupportVideo[]>([]);
   const [videosLoading, setVideosLoading] = useState(true);
   const [showVideoModal, setShowVideoModal] = useState(false);
@@ -80,23 +122,21 @@ export default function HomeScreen() {
     useCallback(() => {
       let cancelled = false;
 
-      // 1. Fetch User Profile
       const fetchProfile = async () => {
         try {
           const { data } = await api.get<MeResponse>("/users/me");
           if (!cancelled) {
             setMe(data);
+            setIsPremier(data.is_premier ?? false);
             setFeeling(feelingFromMoodStatus(data.mood_status));
             try {
-              // Initialize global chat state and connect socket
               const username = data.full_name?.trim() || data.id;
               useChatStore.getState().setMe({
-               _id: data.id,
-               userId: data.id,
-               username: data.full_name,
-               full_name: data.full_name,
-             });
-              // Pass access token if available to authenticate socket (optional)
+                _id: data.id,
+                userId: data.id,
+                username: data.full_name,
+                full_name: data.full_name,
+              });
               const token = useAuthStore.getState().accessToken ?? undefined;
               connectSocket(username, token);
             } catch (e) {
@@ -112,7 +152,24 @@ export default function HomeScreen() {
         }
       };
 
-      // 2. Fetch Support Videos
+      const fetchNextAppointment = async () => {
+        setAppointmentLoading(true);
+        try {
+          // Returns array sorted by date asc; take first upcoming one
+          const { data } = await api.get<NextAppointment[]>(
+            "/appointments?limit=1&status=upcoming",
+          );
+          if (!cancelled) {
+            setNextAppointment(data?.[0] ?? null);
+          }
+        } catch (e) {
+          logClientError("home.loadNextAppointment", e);
+          if (!cancelled) setNextAppointment(null);
+        } finally {
+          if (!cancelled) setAppointmentLoading(false);
+        }
+      };
+
       const fetchVideos = async () => {
         setVideosLoading(true);
         try {
@@ -126,6 +183,7 @@ export default function HomeScreen() {
       };
 
       void fetchProfile();
+      void fetchNextAppointment();
       void fetchVideos();
 
       return () => {
@@ -144,7 +202,7 @@ export default function HomeScreen() {
         mood_status,
       });
       setMe(data);
-      setHasSubmittedFeeling(true); // Shows Thank You message
+      setHasSubmittedFeeling(true);
     } catch (e) {
       logClientError("home.saveFeeling", e, { next });
       Alert.alert("Could not save check-in", getApiErrorMessage(e));
@@ -154,18 +212,13 @@ export default function HomeScreen() {
     }
   }
 
-  // Toggle favorite with Optimistic UI Update
   const toggleFavorite = async (id: string) => {
-    // 1. Optimistically update local state
     setVideos((prev) =>
       prev.map((v) => (v.id === id ? { ...v, isFavorite: !v.isFavorite } : v)),
     );
-
-    // 2. Call backend
     try {
       await api.post(`/doctor/videos/${id}/toggle-favorite`);
-    } catch (e) {
-      // 3. Revert local state on failure
+    } catch {
       setVideos((prev) =>
         prev.map((v) =>
           v.id === id ? { ...v, isFavorite: !v.isFavorite } : v,
@@ -175,32 +228,33 @@ export default function HomeScreen() {
     }
   };
 
-  const handlePlayVideo = async (video: SupportVideo) => {
-    // 1. Optimistically increment listen count locally
+  const handlePlayVideo = (video: SupportVideo) => {
+    setPlayingVideo(video);
     setVideos((prev) =>
       prev.map((v) =>
-        v.id === video.id ? { ...v, listens: v.listens + 1 } : v,
+        v.id === video.id ? { ...v, listens: (v.listens ?? 0) + 1 } : v,
       ),
     );
-
-    // 2. Increment in backend (fire and forget)
     api.post(`/doctor/videos/${video.id}/listen`).catch((e) => {
       logClientError("home.incrementListen", e);
     });
-
-    // 3. Navigate to Video Player or open external URL
-    // router.push({ pathname: '/video-player', params: { url: video.video_url } });
-    Alert.alert("Playing Video", `Now playing: ${video.title}`);
   };
 
   const firstName = me?.full_name?.trim()?.split(/\s+/)[0] ?? "there";
-  const avatarUri = me?.avatar_url?.trim()
-    ? me.avatar_url.trim()
-    : DEFAULT_AVATAR;
+  const avatarUri = me?.avatar_url?.trim() ? me.avatar_url.trim() : image1;
+  const isPremier = me?.is_premier ?? false;
+  const aiChatsUsed = me?.ai_chats_used_today ?? 0;
+  const aiChatsLimit = me?.ai_chats_daily_limit ?? null;
+  const aiRemaining = aiChatsLimit != null ? aiChatsLimit - aiChatsUsed : null;
 
-  // Reusable component for displaying videos
+  // 4. Fix renderVideoCard to use the correct field names
   const renderVideoCard = (video: SupportVideo, isStandalone = false) => {
     const isFav = !!video.isFavorite;
+
+    // Auto-generate thumbnail from Cloudinary video URL
+    const thumbnailUri = video.video_url
+      .replace("/video/upload/", "/video/upload/so_0,w_400,h_225,c_fill/")
+      .replace(/\.(mp4|mov|avi|mkv)$/, ".jpg");
 
     return (
       <View
@@ -211,22 +265,25 @@ export default function HomeScreen() {
           activeOpacity={0.8}
           onPress={() => handlePlayVideo(video)}
         >
-          <Image source={{ uri: video.thumbnail }} style={styles.videoImage} />
+          <Image source={{ uri: thumbnailUri }} style={styles.videoImage} />
           <View style={styles.playButtonOverlay}>
             <Ionicons name="play-circle" size={48} color="#FFF" />
           </View>
           <View style={styles.videoTag}>
-            <Text style={styles.videoTagText}>{video.tag}</Text>
+            <Text style={styles.videoTagText}>{video.category}</Text>{" "}
+            {/* was video.tag */}
           </View>
         </TouchableOpacity>
-
         <View style={styles.videoInfo}>
           <View style={{ flex: 1 }}>
             <Text style={styles.videoTitle}>{video.title}</Text>
-            <Text style={styles.amharicVideoTitle}>{video.amharicTitle}</Text>
+            <Text style={styles.amharicVideoTitle}>
+              {video.amharic_title}
+            </Text>{" "}
+            {/* was video.amharicTitle */}
             <Text style={styles.videoMeta}>
               <Feather name="headphones" size={12} color="#4ADE80" />{" "}
-              {video.listens} listens
+              {video.listens ?? 0} listens
             </Text>
           </View>
           <TouchableOpacity
@@ -251,13 +308,16 @@ export default function HomeScreen() {
         contentContainerStyle={styles.scrollContent}
       >
         {/* HEADER */}
-        <View style={styles.header}>
-          <View style={styles.logoBox}>
-            <Feather name="wind" size={20} color="#FFF" />
-          </View>
-          <View>
-            <Image source={{ uri: avatarUri }} style={styles.avatar} />
-            <View style={styles.onlineDot} />
+        <View style={styles.logoRow}>
+          <Image
+            source={image1}
+            style={styles.logoImage}
+            resizeMode="contain"
+          />
+          <View style={styles.logoTextWrap}>
+            <Text style={styles.logoTitle}>TefasMind</Text>
+            <Text style={styles.logoSubtitle}>Mental Wellness Platform</Text>
+            <Text style={styles.logoAmharic}>የአእምሮ ጤና መድረክ</Text>
           </View>
         </View>
 
@@ -275,7 +335,7 @@ export default function HomeScreen() {
           </Text>
         </View>
 
-        {/* FEELINGS CARD / THANK YOU STATE */}
+        {/* FEELINGS CARD */}
         <View style={styles.card}>
           <View style={styles.rowBetween}>
             <View>
@@ -299,102 +359,51 @@ export default function HomeScreen() {
             </View>
           ) : (
             <View style={styles.feelingsRow}>
-              <TouchableOpacity
-                style={[
-                  styles.feelingBox,
-                  feeling === "happy" ? styles.feelingBoxActive : undefined,
-                ]}
-                onPress={() => void saveFeeling("happy")}
-                disabled={moodSaving}
-              >
-                <Feather
-                  name="smile"
-                  size={32}
-                  color={feeling === "happy" ? "#4ADE80" : "#6B7280"}
-                />
-                <Text
-                  style={
-                    feeling === "happy"
-                      ? styles.feelingTextActive
-                      : styles.feelingText
-                  }
+              {(["happy", "neutral", "sad"] as Feeling[]).map((f) => (
+                <TouchableOpacity
+                  key={f}
+                  style={[
+                    styles.feelingBox,
+                    feeling === f ? styles.feelingBoxActive : undefined,
+                  ]}
+                  onPress={() => void saveFeeling(f)}
+                  disabled={moodSaving}
                 >
-                  Happy
-                </Text>
-                <Text
-                  style={
-                    feeling === "happy"
-                      ? styles.amharicFeelingTextActive
-                      : styles.amharicFeelingText
-                  }
-                >
-                  ደስተኛ
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.feelingBox,
-                  feeling === "neutral" ? styles.feelingBoxActive : undefined,
-                ]}
-                onPress={() => void saveFeeling("neutral")}
-                disabled={moodSaving}
-              >
-                <Feather
-                  name="meh"
-                  size={32}
-                  color={feeling === "neutral" ? "#4ADE80" : "#6B7280"}
-                />
-                <Text
-                  style={
-                    feeling === "neutral"
-                      ? styles.feelingTextActive
-                      : styles.feelingText
-                  }
-                >
-                  Neutral
-                </Text>
-                <Text
-                  style={
-                    feeling === "neutral"
-                      ? styles.amharicFeelingTextActive
-                      : styles.amharicFeelingText
-                  }
-                >
-                  መካከለኛ
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.feelingBox,
-                  feeling === "sad" ? styles.feelingBoxActive : undefined,
-                ]}
-                onPress={() => void saveFeeling("sad")}
-                disabled={moodSaving}
-              >
-                <Feather
-                  name="frown"
-                  size={32}
-                  color={feeling === "sad" ? "#4ADE80" : "#6B7280"}
-                />
-                <Text
-                  style={
-                    feeling === "sad"
-                      ? styles.feelingTextActive
-                      : styles.feelingText
-                  }
-                >
-                  Sad
-                </Text>
-                <Text
-                  style={
-                    feeling === "sad"
-                      ? styles.amharicFeelingTextActive
-                      : styles.amharicFeelingText
-                  }
-                >
-                  የተከፋ
-                </Text>
-              </TouchableOpacity>
+                  <Feather
+                    name={
+                      f === "happy"
+                        ? "smile"
+                        : f === "neutral"
+                          ? "meh"
+                          : "frown"
+                    }
+                    size={32}
+                    color={feeling === f ? "#4ADE80" : "#6B7280"}
+                  />
+                  <Text
+                    style={
+                      feeling === f
+                        ? styles.feelingTextActive
+                        : styles.feelingText
+                    }
+                  >
+                    {f.charAt(0).toUpperCase() + f.slice(1)}
+                  </Text>
+                  <Text
+                    style={
+                      feeling === f
+                        ? styles.amharicFeelingTextActive
+                        : styles.amharicFeelingText
+                    }
+                  >
+                    {f === "happy"
+                      ? "ደስተኛ"
+                      : f === "neutral"
+                        ? "መካከለኛ"
+                        : "የተከፋ"}
+                  </Text>
+                </TouchableOpacity>
+              ))}
             </View>
           )}
         </View>
@@ -404,52 +413,61 @@ export default function HomeScreen() {
           Quick Actions{" "}
           <Text style={styles.amharicSectionTitle}>/ ፈጣን እርምጃዎች</Text>
         </Text>
-        <View style={styles.quickActionsRow}>
-          {psychiatrist ? (
-            <>
-              <TouchableOpacity
-                style={styles.actionCard}
-                onPress={() =>
-                  router.push("/(tabs)/(psychiatrist-tabs)/dashboard")
-                }
-              >
-                <Feather name="grid" size={24} color="#111827" />
-                <View style={{ marginTop: 16 }}>
-                  <Text style={styles.actionTitle}>Dashboard</Text>
-                  <Text style={styles.amharicActionTitle}>ዳሽቦርድ</Text>
-                </View>
-                <Feather
-                  name="arrow-right"
-                  size={16}
-                  color="#9CA3AF"
-                  style={styles.actionArrow}
-                />
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.actionCard}
-                onPress={() => router.push("/(tabs)/(psychiatrist-tabs)/users")}
-              >
-                <Feather name="users" size={24} color="#111827" />
-                <View style={{ marginTop: 16 }}>
-                  <Text style={styles.actionTitle}>Users</Text>
-                  <Text style={styles.amharicActionTitle}>ተጠቃሚዎች</Text>
-                </View>
-                <Feather
-                  name="arrow-right"
-                  size={16}
-                  color="#9CA3AF"
-                  style={styles.actionArrow}
-                />
-              </TouchableOpacity>
-            </>
-          ) : (
-            <>
+
+        {psychiatrist ? (
+          <View style={styles.quickActionsRow}>
+            <TouchableOpacity
+              style={styles.actionCard}
+              onPress={() =>
+                router.push("/(tabs)/(psychiatrist-tabs)/dashboard")
+              }
+            >
+              <Feather name="grid" size={24} color="#111827" />
+              <View style={{ marginTop: 16 }}>
+                <Text style={styles.actionTitle}>Dashboard</Text>
+                <Text style={styles.amharicActionTitle}>ዳሽቦርድ</Text>
+              </View>
+              <Feather
+                name="arrow-right"
+                size={16}
+                color="#9CA3AF"
+                style={styles.actionArrow}
+              />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.actionCard}
+              onPress={() => router.push("/(tabs)/(psychiatrist-tabs)/users")}
+            >
+              <Feather name="users" size={24} color="#111827" />
+              <View style={{ marginTop: 16 }}>
+                <Text style={styles.actionTitle}>Users</Text>
+                <Text style={styles.amharicActionTitle}>ተጠቃሚዎች</Text>
+              </View>
+              <Feather
+                name="arrow-right"
+                size={16}
+                color="#9CA3AF"
+                style={styles.actionArrow}
+              />
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <>
+            {/* Row 1: Book + Talk */}
+            <View style={styles.quickActionsRow}>
               <TouchableOpacity
                 style={styles.actionCard}
                 onPress={() => router.push("/(tabs)/(user-tabs)/book")}
               >
-                <Feather name="calendar" size={24} color="#111827" />
-                <View style={{ marginTop: 16 }}>
+                <View
+                  style={[
+                    styles.actionIconWrap,
+                    { backgroundColor: "#F0FDF4" },
+                  ]}
+                >
+                  <Feather name="calendar" size={22} color="#16A34A" />
+                </View>
+                <View style={{ marginTop: 12 }}>
                   <Text style={styles.actionTitle}>Book Session</Text>
                   <Text style={styles.amharicActionTitle}>ቀጠሮ ይያዙ</Text>
                 </View>
@@ -460,12 +478,20 @@ export default function HomeScreen() {
                   style={styles.actionArrow}
                 />
               </TouchableOpacity>
+
               <TouchableOpacity
                 style={styles.actionCard}
                 onPress={() => router.push("/(tabs)/(user-tabs)/chats")}
               >
-                <Feather name="message-square" size={24} color="#111827" />
-                <View style={{ marginTop: 16 }}>
+                <View
+                  style={[
+                    styles.actionIconWrap,
+                    { backgroundColor: "#EFF6FF" },
+                  ]}
+                >
+                  <Feather name="message-square" size={22} color="#2563EB" />
+                </View>
+                <View style={{ marginTop: 12 }}>
                   <Text style={styles.actionTitle}>Talk Now</Text>
                   <Text style={styles.amharicActionTitle}>አሁን ይነጋገሩ</Text>
                 </View>
@@ -476,9 +502,197 @@ export default function HomeScreen() {
                   style={styles.actionArrow}
                 />
               </TouchableOpacity>
-            </>
-          )}
-        </View>
+            </View>
+
+            {/* Row 2: AI Chat — premier only */}
+            {isPremier ? (
+              <TouchableOpacity
+                style={styles.aiChatCard}
+                onPress={() => router.push("/(tabs)/(user-tabs)/aichat")}
+                activeOpacity={0.85}
+              >
+                <View style={styles.aiChatLeft}>
+                  <View style={styles.aiChatAvatarWrap}>
+                    <View style={styles.aiChatAvatar}>
+                      <Text style={styles.aiChatAvatarText}>Dr</Text>
+                    </View>
+                    <View style={styles.aiChatOnlineDot} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <View style={styles.aiChatNameRow}>
+                      <Text style={styles.aiChatName}>Dr. Selam</Text>
+                      <View style={styles.aiChatBadge}>
+                        <Text style={styles.aiChatBadgeText}>AI</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.aiChatSub}>
+                      Mental Wellness AI · Always here
+                    </Text>
+                    {aiChatsLimit !== null && (
+                      <View style={styles.aiUsageRow}>
+                        <View style={styles.aiUsageTrack}>
+                          <View
+                            style={[
+                              styles.aiUsageFill,
+                              {
+                                width: `${Math.min((aiChatsUsed / aiChatsLimit!) * 100, 100)}%`,
+                                backgroundColor:
+                                  (aiRemaining ?? 0) <= 2
+                                    ? "#EF4444"
+                                    : GREEN_DARK,
+                              },
+                            ]}
+                          />
+                        </View>
+                        <Text
+                          style={[
+                            styles.aiUsageLabel,
+                            (aiRemaining ?? 0) <= 2 && { color: "#EF4444" },
+                          ]}
+                        >
+                          {aiRemaining} left
+                        </Text>
+                      </View>
+                    )}
+                    {aiChatsLimit === null && (
+                      <Text style={styles.aiUnlimitedLabel}>
+                        Unlimited chats ✨
+                      </Text>
+                    )}
+                  </View>
+                </View>
+                <View style={styles.aiChatArrow}>
+                  <Feather name="chevron-right" size={18} color={GREEN_DARK} />
+                </View>
+              </TouchableOpacity>
+            ) : (
+              /* Free users — upgrade CTA */
+              <TouchableOpacity
+                style={styles.aiChatLockedCard}
+                onPress={() => router.push("/(tabs)/(user-tabs)/profile")}
+                activeOpacity={0.85}
+              >
+                <View style={styles.aiChatLockedLeft}>
+                  <View style={styles.aiChatLockedIcon}>
+                    <Feather name="lock" size={18} color="#B45309" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.aiChatLockedTitle}>
+                      Dr. Selam AI Chat
+                    </Text>
+                    <Text style={styles.aiChatLockedSub}>
+                      Upgrade to Premier to unlock 24/7 AI support
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.aiChatUpgradeBtn}>
+                  <Feather name="star" size={12} color="#fff" />
+                  <Text style={styles.aiChatUpgradeBtnText}>Upgrade</Text>
+                </View>
+              </TouchableOpacity>
+            )}
+          </>
+        )}
+
+        {/* NEXT APPOINTMENT CARD (users only) */}
+        {!psychiatrist && (
+          <>
+            <Text style={[styles.sectionTitle, { marginTop: 8 }]}>
+              Next Appointment{" "}
+              <Text style={styles.amharicSectionTitle}>/ ቀጣይ ቀጠሮ</Text>
+            </Text>
+
+            {appointmentLoading ? (
+              <View style={styles.appointmentCard}>
+                <ActivityIndicator color="#16A34A" size="small" />
+              </View>
+            ) : nextAppointment ? (
+              <TouchableOpacity
+                style={styles.appointmentCard}
+                onPress={() => router.push("/(tabs)/(user-tabs)/book")}
+                activeOpacity={0.85}
+              >
+                {/* Left accent bar */}
+                <View style={styles.appointmentAccent} />
+
+                <View style={styles.appointmentAvatarWrap}>
+                  <View style={styles.appointmentAvatar}>
+                    <Feather name="user" size={22} color="#16A34A" />
+                  </View>
+                  <View style={styles.appointmentOnlineDot} />
+                </View>
+
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.appointmentName}>
+                    {nextAppointment.counselor_name}
+                  </Text>
+                  {nextAppointment.specialization ? (
+                    <Text style={styles.appointmentSpec}>
+                      {nextAppointment.specialization}
+                    </Text>
+                  ) : null}
+                  <View style={styles.appointmentMetaRow}>
+                    <View style={styles.appointmentMetaChip}>
+                      <Feather name="calendar" size={11} color="#16A34A" />
+                      <Text style={styles.appointmentMetaText}>
+                        {formatAppointmentDate(nextAppointment.scheduled_at)}
+                      </Text>
+                    </View>
+                    <View
+                      style={[
+                        styles.appointmentMetaChip,
+                        { backgroundColor: "#EFF6FF" },
+                      ]}
+                    >
+                      <Feather name="clock" size={11} color="#2563EB" />
+                      <Text
+                        style={[
+                          styles.appointmentMetaText,
+                          { color: "#2563EB" },
+                        ]}
+                      >
+                        {formatAppointmentTime(nextAppointment.scheduled_at)}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+
+                <View style={styles.appointmentVerified}>
+                  <Feather name="shield" size={11} color="#16A34A" />
+                  <Text style={styles.appointmentVerifiedText}>Verified</Text>
+                </View>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={styles.appointmentEmptyCard}
+                onPress={() => router.push("/(tabs)/(user-tabs)/book")}
+                activeOpacity={0.85}
+              >
+                <View
+                  style={[
+                    styles.actionIconWrap,
+                    {
+                      backgroundColor: "#F0FDF4",
+                      marginBottom: 0,
+                      marginRight: 14,
+                    },
+                  ]}
+                >
+                  <Feather name="calendar" size={20} color="#16A34A" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.appointmentEmptyTitle}>
+                    No upcoming sessions
+                  </Text>
+                  <Text style={styles.appointmentEmptySub}>
+                    Book your first session today
+                  </Text>
+                </View>
+                <Feather name="arrow-right" size={16} color="#16A34A" />
+              </TouchableOpacity>
+            )}
+          </>
+        )}
 
         {/* EMERGENCY BUTTON */}
         <TouchableOpacity
@@ -512,7 +726,6 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Preview just the first video on Home screen or show loading state */}
         {videosLoading ? (
           <View
             style={[
@@ -587,13 +800,118 @@ export default function HomeScreen() {
           )}
         </SafeAreaView>
       </Modal>
+      {/* VIDEO PLAYER MODAL */}
+      <Modal
+        visible={!!playingVideo}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setPlayingVideo(null)}
+      >
+        <SafeAreaView style={{ flex: 1, backgroundColor: "#000" }}>
+          {/* Header */}
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              paddingHorizontal: 16,
+              paddingVertical: 12,
+              backgroundColor: "#111827",
+            }}
+          >
+            <View style={{ flex: 1, marginRight: 12 }}>
+              <Text
+                numberOfLines={1}
+                style={{ color: "#FFF", fontWeight: "700", fontSize: 15 }}
+              >
+                {playingVideo?.title}
+              </Text>
+              <Text
+                numberOfLines={1}
+                style={{ color: "#9CA3AF", fontSize: 12, marginTop: 2 }}
+              >
+                {playingVideo?.amharic_title}
+              </Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => setPlayingVideo(null)}
+              style={{
+                backgroundColor: "#374151",
+                borderRadius: 20,
+                padding: 8,
+              }}
+            >
+              <Feather name="x" size={20} color="#FFF" />
+            </TouchableOpacity>
+          </View>
+
+          {/* Player */}
+          {playingVideo && (
+            <Video
+              source={{ uri: playingVideo.video_url }}
+              style={{ width: "100%", aspectRatio: 16 / 9 }}
+              useNativeControls
+              resizeMode={ResizeMode.CONTAIN}
+              shouldPlay
+              onError={(error) => {
+                console.warn("Video error", error);
+                Alert.alert("Playback Error", "Could not play this video.");
+                setPlayingVideo(null);
+              }}
+            />
+          )}
+
+          {/* Info below player */}
+          <View style={{ padding: 20 }}>
+            <View
+              style={{
+                alignSelf: "flex-start",
+                backgroundColor: "#4ADE80",
+                paddingHorizontal: 10,
+                paddingVertical: 4,
+                borderRadius: 12,
+                marginBottom: 12,
+              }}
+            >
+              <Text style={{ color: "#FFF", fontWeight: "700", fontSize: 12 }}>
+                {playingVideo?.category}
+              </Text>
+            </View>
+            <Text style={{ color: "#FFF", fontWeight: "700", fontSize: 18 }}>
+              {playingVideo?.title}
+            </Text>
+            <Text style={{ color: "#9CA3AF", fontSize: 14, marginTop: 6 }}>
+              {playingVideo?.amharic_title}
+            </Text>
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 6,
+                marginTop: 12,
+              }}
+            >
+              <Feather name="headphones" size={14} color="#4ADE80" />
+              <Text style={{ color: "#6B7280", fontSize: 13 }}>
+                {playingVideo?.listens ?? 0} listens
+              </Text>
+            </View>
+          </View>
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
+const GREEN = "#4ADE80";
+const GREEN_DARK = "#16A34A";
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F9FAFB" },
   scrollContent: { padding: 20 },
+
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -615,15 +933,17 @@ const styles = StyleSheet.create({
     right: 0,
     width: 12,
     height: 12,
-    backgroundColor: "#4ADE80",
+    backgroundColor: GREEN,
     borderRadius: 6,
     borderWidth: 2,
     borderColor: "#F9FAFB",
   },
+
   greetingSection: { marginBottom: 24 },
   greeting: { fontSize: 24, fontWeight: "bold", color: "#111827" },
   amharicGreeting: { fontSize: 20, color: "#6B7280", fontWeight: "normal" },
   subGreeting: { fontSize: 14, color: "#6B7280", marginTop: 4 },
+
   card: {
     backgroundColor: "#FFFFFF",
     borderRadius: 20,
@@ -650,7 +970,6 @@ const styles = StyleSheet.create({
   },
   badgeText: { color: "#22C55E", fontSize: 12, fontWeight: "600" },
 
-  // Feelings UI
   feelingsRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -667,7 +986,7 @@ const styles = StyleSheet.create({
   feelingBoxActive: {
     backgroundColor: "#DCFCE7",
     borderWidth: 1,
-    borderColor: "#4ADE80",
+    borderColor: GREEN,
   },
   feelingText: {
     fontSize: 14,
@@ -684,7 +1003,6 @@ const styles = StyleSheet.create({
   amharicFeelingText: { fontSize: 11, color: "#9CA3AF", marginTop: 2 },
   amharicFeelingTextActive: { fontSize: 11, color: "#22C55E", marginTop: 2 },
 
-  // Thank you UI
   thankYouContainer: {
     alignItems: "center",
     justifyContent: "center",
@@ -706,10 +1024,12 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   amharicSectionTitle: { fontSize: 14, color: "#6B7280", fontWeight: "normal" },
+
+  // Quick Actions
   quickActionsRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 20,
+    marginBottom: 12,
   },
   actionCard: {
     flex: 1,
@@ -723,9 +1043,285 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     elevation: 2,
   },
+  actionIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 4,
+  },
   actionTitle: { fontSize: 15, fontWeight: "700", color: "#111827" },
   amharicActionTitle: { fontSize: 12, color: "#6B7280", marginTop: 2 },
   actionArrow: { position: "absolute", bottom: 16, right: 16 },
+
+  // AI Chat Card
+  aiChatCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: "#BBF7D0",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  aiChatLeft: { flexDirection: "row", alignItems: "center", flex: 1, gap: 12 },
+  aiChatAvatarWrap: { position: "relative" },
+  aiChatAvatar: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: "#DCFCE7",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  aiChatAvatarText: { fontSize: 13, fontWeight: "800", color: GREEN_DARK },
+  aiChatOnlineDot: {
+    position: "absolute",
+    bottom: 1,
+    right: 1,
+    width: 11,
+    height: 11,
+    borderRadius: 6,
+    backgroundColor: GREEN,
+    borderWidth: 2,
+    borderColor: "#fff",
+  },
+  aiChatNameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 2,
+  },
+  aiChatName: { fontSize: 15, fontWeight: "800", color: "#111827" },
+  aiChatBadge: {
+    backgroundColor: "#DCFCE7",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  aiChatBadgeText: { fontSize: 10, fontWeight: "800", color: GREEN_DARK },
+  premierBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    backgroundColor: "#FEF3C7",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  premierBadgeText: { fontSize: 10, fontWeight: "700", color: "#B45309" },
+  aiChatSub: { fontSize: 12, color: "#6B7280" },
+  aiUsageRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 6,
+  },
+  aiUsageTrack: {
+    flex: 1,
+    height: 4,
+    backgroundColor: "#E5E7EB",
+    borderRadius: 2,
+    overflow: "hidden",
+  },
+  aiUsageFill: { height: "100%", borderRadius: 2 },
+  aiUsageLabel: { fontSize: 10, fontWeight: "600", color: "#6B7280" },
+  aiUnlimitedLabel: {
+    fontSize: 11,
+    color: GREEN_DARK,
+    fontWeight: "600",
+    marginTop: 4,
+  },
+  aiChatArrow: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#F0FDF4",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  // Locked AI chat card (free users)
+  aiChatLockedCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#FFFBEB",
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: "#FDE68A",
+  },
+  aiChatLockedLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    flex: 1,
+  },
+  aiChatLockedIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#FEF3C7",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  aiChatLockedTitle: { fontSize: 14, fontWeight: "800", color: "#92400E" },
+  aiChatLockedSub: { fontSize: 12, color: "#B45309", marginTop: 2 },
+  aiChatUpgradeBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "#B45309",
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  aiChatUpgradeBtnText: { color: "#fff", fontWeight: "800", fontSize: 12 },
+
+  // Next Appointment Card
+  appointmentCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 20,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "#E5E7EB",
+    gap: 12,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 2,
+    overflow: "hidden",
+  },
+  logoContainer: {
+    alignItems: "center",
+    marginBottom: 28,
+  },
+  logoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 28,
+  },
+
+  logoImage: {
+    width: 64,
+    height: 64,
+    borderRadius: 16,
+  },
+  logoTextWrap: {
+    alignItems: "flex-end", // ← text aligns to the right edge
+    justifyContent: "center",
+  },
+  logoTitle: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: "#111827",
+    letterSpacing: 0.3,
+  },
+  logoSubtitle: {
+    fontSize: 12,
+    color: "#6B7280",
+    marginTop: 2,
+  },
+  logoAmharic: {
+    fontSize: 11,
+    color: "#9CA3AF",
+    marginTop: 1,
+  },
+  appointmentAccent: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 4,
+    backgroundColor: GREEN_DARK,
+    borderTopLeftRadius: 20,
+    borderBottomLeftRadius: 20,
+  },
+  appointmentAvatarWrap: { position: "relative" },
+  appointmentAvatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 14,
+    backgroundColor: "#DCFCE7",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  appointmentOnlineDot: {
+    position: "absolute",
+    bottom: 2,
+    right: 2,
+    width: 11,
+    height: 11,
+    borderRadius: 6,
+    backgroundColor: GREEN_DARK,
+    borderWidth: 2,
+    borderColor: "#FFFFFF",
+  },
+  appointmentName: { fontSize: 15, fontWeight: "700", color: "#111827" },
+  appointmentSpec: {
+    fontSize: 12,
+    color: "#6B7280",
+    marginTop: 1,
+    marginBottom: 6,
+  },
+  appointmentMetaRow: { flexDirection: "row", gap: 6 },
+  appointmentMetaChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#F0FDF4",
+    borderRadius: 8,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+  },
+  appointmentMetaText: { fontSize: 11, fontWeight: "600", color: GREEN_DARK },
+  appointmentVerified: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    backgroundColor: "#F0FDF4",
+    borderRadius: 8,
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "#BBF7D0",
+    alignSelf: "flex-start",
+  },
+  appointmentVerifiedText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: GREEN_DARK,
+  },
+
+  appointmentEmptyCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: "#BBF7D0",
+    borderStyle: "dashed",
+  },
+  appointmentEmptyTitle: { fontSize: 14, fontWeight: "700", color: "#374151" },
+  appointmentEmptySub: { fontSize: 12, color: "#6B7280", marginTop: 2 },
+
+  // Emergency
   emergencyCard: {
     backgroundColor: "#FEF2F2",
     flexDirection: "row",
@@ -753,14 +1349,15 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   sosText: { color: "#EF4444", fontWeight: "bold", fontSize: 12 },
+
   seeAllText: {
-    color: "#4ADE80",
+    color: GREEN,
     fontWeight: "600",
     fontSize: 14,
     marginBottom: 16,
   },
 
-  // Video Shared UI
+  // Videos
   videoCard: {
     backgroundColor: "#FFFFFF",
     borderRadius: 20,
@@ -777,7 +1374,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: 12,
     left: 12,
-    backgroundColor: "#4ADE80",
+    backgroundColor: GREEN,
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
@@ -798,7 +1395,7 @@ const styles = StyleSheet.create({
   },
   videoMeta: { fontSize: 12, color: "#9CA3AF" },
 
-  // Video Modal Styles
+  // Modal
   modalContainer: { flex: 1, backgroundColor: "#F9FAFB" },
   modalHeader: {
     flexDirection: "row",

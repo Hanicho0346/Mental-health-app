@@ -257,6 +257,7 @@ export default function DashboardScreen() {
       }
 
       Alert.alert("Upload failed", detail);
+      
     } finally {
       setIsUploading(false);
     }

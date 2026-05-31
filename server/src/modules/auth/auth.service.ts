@@ -13,7 +13,7 @@ import { generateNumericOtp, hashOtp, verifyOtpHash } from '../../utils/otp.js';
 import { hashRefreshToken } from '../../utils/tokenHash.js';
 import { logServerError } from '../../utils/logger.js';
 import type { UserRole } from '../../types/roles.js';
-
+import { uploadBuffer } from '../../services/cloudinary.service.js';
 const SALT_ROUNDS = 12;
 
 function pickRole(r: unknown): UserRole {
@@ -176,6 +176,8 @@ export async function registerWithPassword(
     medical_license?: string;
     specialization?: string;
     experience_years?: number;
+    hospital_or_clinic?: string;  // ← ADD
+    certificate_url?: string;     // ← ADD
   },
   req: Request
 ): Promise<RegisterPendingVerification | RegisterAuthPayload> {
@@ -216,6 +218,7 @@ export async function registerWithPassword(
   }
 
   const verificationStatus = assignedRole === 'psychiatrist' ? ('pending' as const) : undefined;
+
   const user = await User.create({
     full_name: input.full_name.trim(),
     email: registeredEmail,
@@ -232,6 +235,18 @@ export async function registerWithPassword(
           medical_license: input.medical_license?.trim(),
           specialization: input.specialization?.trim(),
           experience_years: input.experience_years,
+          hospital_or_clinic: input.hospital_or_clinic?.trim() || '',
+          // ── Store uploaded certificate in uploaded_documents ──
+          uploaded_documents: input.certificate_url
+            ? [
+                {
+                  url: input.certificate_url,
+                  public_id: '',
+                  kind: 'psychiatrist_doc' as const,
+                  uploaded_at: new Date(),
+                },
+              ]
+            : [],
         }
       : input.national_id?.trim()
         ? { national_id: input.national_id.trim() }
@@ -336,6 +351,55 @@ export async function forgotPasswordRequest(input: { email: string }): Promise<{
     text: `Your password reset code is: ${code}. It expires in one hour.`,
   });
   return { ok: true };
+}
+
+
+
+export async function uploadDocument(input: {
+  email: string;
+  fileBuffer: Buffer;
+  mimeType: string;
+}): Promise<{ ok: boolean; url: string }> {
+  const safeEmail = input.email.trim().toLowerCase().replace(/[^a-z0-9]/g, '_');
+
+  const { url, public_id } = await uploadBuffer(
+    input.fileBuffer,
+    'psychiatrist_certificates',
+    {
+      publicId: `cert_pending_${safeEmail}`,
+      resourceType: input.mimeType === 'application/pdf' ? 'raw' : 'image',
+    },
+  );
+
+  // If user already exists (re-upload case), save immediately
+  const existing = await User.findOne({
+    email: input.email.trim().toLowerCase(),
+  }).exec();
+
+  if (existing) {
+    // Remove any previous certificate doc, then push the new one
+    await User.updateOne(
+      { _id: existing._id },
+      {
+        $pull: { uploaded_documents: { kind: 'psychiatrist_doc' } },
+      },
+    );
+    await User.updateOne(
+      { _id: existing._id },
+      {
+        $push: {
+          uploaded_documents: {
+            url,
+            public_id,
+            kind: 'psychiatrist_doc',
+            uploaded_at: new Date(),
+          },
+        },
+      },
+    );
+  }
+
+  return { ok: true, url };
 }
 
 export async function resetPasswordWithCode(input: { email: string; code: string; password: string }): Promise<{ ok: boolean }> {

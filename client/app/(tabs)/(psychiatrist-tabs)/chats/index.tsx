@@ -116,8 +116,14 @@ export default function PsychiatristChatsLobby() {
   };
 
   const renderChatItem = ({ item }: { item: any }) => {
-    const peerId      = item?.peerId || item?._id;
-    const peerName    = item?.peerName || item?.full_name || "User";
+    const peerId   = item?.peerId   || item?._id;
+
+  const rawName  = item?.peerName || item?.full_name || item?.name || item?.username || "";
+  
+ 
+  const isMongoId = rawName.length === 24 && /^[0-9a-fA-F]+$/.test(rawName);
+  const peerName  = (!rawName || isMongoId) ? "User" : rawName;
+ 
     const lastMessage = item?.lastMessage || "No messages yet";
     const unreadCount = item?.unreadCount || 0;
     const isOnline    = item?.isOnline || false;

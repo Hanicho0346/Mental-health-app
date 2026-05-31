@@ -1,8 +1,8 @@
 // app/(tabs)/(user-tabs)/ai-chat.tsx
-import { api } from '@/lib/api';
-import { getApiErrorMessage } from '@/lib/log';
-import { Feather } from '@expo/vector-icons';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { api } from "@/lib/api";
+import { getApiErrorMessage } from "@/lib/log";
+import { Feather } from "@expo/vector-icons";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -14,14 +14,14 @@ import {
   TextInput,
   TouchableOpacity,
   View,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Message = {
   id: string;
-  role: 'user' | 'assistant';
+  role: "user" | "assistant";
   content: string;
   created_at?: string;
 };
@@ -33,28 +33,27 @@ type UsageInfo = {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const GREEN = '#4ADE80';
-const GREEN_DARK = '#16A34A';
-const TEAL = '#0D9488';
+const GREEN = "#4ADE80";
+const GREEN_DARK = "#16A34A";
 
 const WELCOME_MESSAGE: Message = {
-  id: 'welcome',
-  role: 'assistant',
+  id: "welcome",
+  role: "assistant",
   content:
-    "Selam! 👋 I'm Dr. Selam, your mental wellness companion.\n\nI'm here to listen, support, and guide you through whatever you're feeling — anxiety, stress, relationship challenges, grief, or simply needing someone to talk to.\n\nEverything you share stays between us. How are you feeling today?",
+    "Selam! 👋 I'm Dr. Tesfa, your mental wellness companion.\n\nI'm here to listen, support, and guide you through whatever you're feeling — anxiety, stress, relationship challenges, grief, or simply needing someone to talk to.\n\nEverything you share stays between us. How are you feeling today?",
 };
 
 const QUICK_PROMPTS = [
   "I've been feeling anxious lately",
-  'I need help managing stress',
-  'I feel overwhelmed and don\'t know why',
-  'I want to talk about my relationships',
+  "I need help managing stress",
+  "I feel overwhelmed and don't know why",
+  "I want to talk about my relationships",
 ];
 
 // ─── Message Bubble ───────────────────────────────────────────────────────────
 
 function MessageBubble({ message }: { message: Message }) {
-  const isUser = message.role === 'user';
+  const isUser = message.role === "user";
   return (
     <View style={[bubbleStyles.row, isUser && bubbleStyles.rowReverse]}>
       {!isUser && (
@@ -89,7 +88,13 @@ function TypingIndicator() {
       <View style={bubbleStyles.avatar}>
         <Text style={bubbleStyles.avatarText}>Dr</Text>
       </View>
-      <View style={[bubbleStyles.bubble, bubbleStyles.aiBubble, { paddingVertical: 14 }]}>
+      <View
+        style={[
+          bubbleStyles.bubble,
+          bubbleStyles.aiBubble,
+          { paddingVertical: 14 },
+        ]}
+      >
         <View style={typingStyles.dots}>
           <View style={[typingStyles.dot, { opacity: 0.4 }]} />
           <View style={[typingStyles.dot, { opacity: 0.7 }]} />
@@ -115,13 +120,13 @@ function UsageBar({ usage }: { usage: UsageInfo | null }) {
         <View
           style={[
             usageStyles.fill,
-            { width: `${pct * 100}%`, backgroundColor: isLow ? '#EF4444' : GREEN_DARK },
+            {
+              width: `${pct * 100}%`,
+              backgroundColor: isLow ? "#EF4444" : GREEN_DARK,
+            },
           ]}
         />
       </View>
-      <Text style={[usageStyles.label, isLow && { color: '#EF4444' }]}>
-        {remaining} {remaining === 1 ? 'message' : 'messages'} left today
-      </Text>
     </View>
   );
 }
@@ -130,7 +135,7 @@ function UsageBar({ usage }: { usage: UsageInfo | null }) {
 
 export default function AIChatScreen() {
   const [messages, setMessages] = useState<Message[]>([WELCOME_MESSAGE]);
-  const [input, setInput] = useState('');
+  const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [usage, setUsage] = useState<UsageInfo | null>(null);
@@ -144,7 +149,7 @@ export default function AIChatScreen() {
 
   async function loadHistory() {
     try {
-      const res = await api.get<Message[]>('/ai-chat/history');
+      const res = await api.get<Message[]>("/ai-chat/history");
       if (res.data.length > 0) {
         setMessages([WELCOME_MESSAGE, ...res.data]);
       }
@@ -161,46 +166,63 @@ export default function AIChatScreen() {
 
     const userMsg: Message = {
       id: `user-${Date.now()}`,
-      role: 'user',
+      role: "user",
       content,
     };
 
-    setMessages(prev => [...prev, userMsg]);
-    setInput('');
+    setMessages((prev) => [...prev, userMsg]);
+    setInput("");
     setLoading(true);
 
     // Build history for context (last 10 messages, skip welcome)
     const history = messages
-      .filter(m => m.id !== 'welcome')
+      .filter((m) => m.id !== "welcome")
       .slice(-10)
-      .map(m => ({ role: m.role, content: m.content }));
+      .map((m) => ({ role: m.role, content: m.content }));
 
     try {
-      const res = await api.post<{ response: string; usage: UsageInfo }>('/ai-chat/message', {
-        message: content,
-        history,
-      });
+      const res = await api.post<{ response: string; usage: UsageInfo }>(
+        "/ai-chat/message",
+        {
+          message: content,
+          history,
+        },
+      );
 
       const aiMsg: Message = {
         id: `ai-${Date.now()}`,
-        role: 'assistant',
+        role: "assistant",
         content: res.data.response,
       };
 
-      setMessages(prev => [...prev, aiMsg]);
+      setMessages((prev) => [...prev, aiMsg]);
       setUsage(res.data.usage);
     } catch (e: any) {
-      if (e?.response?.data?.limit_reached) {
+      const status = e?.response?.status;
+      const data = e?.response?.data;
+
+      if (data?.limit_reached) {
+        // User's own daily limit hit
         setLimitReached(true);
         const limitMsg: Message = {
           id: `limit-${Date.now()}`,
-          role: 'assistant',
+          role: "assistant",
           content:
             "You've reached your daily AI chat limit. 🌙 Upgrade to Premier for unlimited conversations with me anytime.\n\nTake care of yourself until tomorrow — you're doing great. 💚",
         };
-        setMessages(prev => [...prev, limitMsg]);
+        setMessages((prev) => [...prev, limitMsg]);
+      } else if (status === 503) {
+        // Gemini quota exhausted on the server side
+        const retryMsg: Message = {
+          id: `retry-${Date.now()}`,
+          role: "assistant",
+          content:
+            data?.error ??
+            "Dr. Tesfa is resting right now. Please try again in a few minutes. 🌙",
+        };
+        setMessages((prev) => [...prev, retryMsg]);
       } else {
-        Alert.alert('Error', getApiErrorMessage(e));
+        Alert.alert("Error", getApiErrorMessage(e));
       }
     } finally {
       setLoading(false);
@@ -219,24 +241,24 @@ export default function AIChatScreen() {
 
   async function clearHistory() {
     Alert.alert(
-      'Clear Conversation',
-      'This will delete your chat history with Dr. Selam. Are you sure?',
+      "Clear Conversation",
+      "This will delete your chat history with Dr. Tesfa. Are you sure?",
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: "Cancel", style: "cancel" },
         {
-          text: 'Clear',
-          style: 'destructive',
+          text: "Clear",
+          style: "destructive",
           onPress: async () => {
             try {
-              await api.delete('/ai-chat/history');
+              await api.delete("/ai-chat/history");
               setMessages([WELCOME_MESSAGE]);
               setLimitReached(false);
             } catch (e) {
-              Alert.alert('Error', getApiErrorMessage(e));
+              Alert.alert("Error", getApiErrorMessage(e));
             }
           },
         },
-      ]
+      ],
     );
   }
 
@@ -250,8 +272,10 @@ export default function AIChatScreen() {
             <View style={styles.onlineDot} />
           </View>
           <View>
-            <Text style={styles.headerName}>Dr. Selam</Text>
-            <Text style={styles.headerSub}>Mental Wellness AI · Always here</Text>
+            <Text style={styles.headerName}>Dr. Tesfa</Text>
+            <Text style={styles.headerSub}>
+              Mental Wellness AI · Always here
+            </Text>
           </View>
         </View>
         <TouchableOpacity onPress={clearHistory} style={styles.clearBtn}>
@@ -265,8 +289,8 @@ export default function AIChatScreen() {
       {/* Messages */}
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}
       >
         {historyLoading ? (
           <View style={styles.loadingCenter}>
@@ -276,7 +300,7 @@ export default function AIChatScreen() {
           <FlatList
             ref={flatListRef}
             data={messages}
-            keyExtractor={item => item.id}
+            keyExtractor={(item) => item.id}
             renderItem={({ item }) => <MessageBubble message={item} />}
             contentContainerStyle={styles.messageList}
             showsVerticalScrollIndicator={false}
@@ -289,7 +313,7 @@ export default function AIChatScreen() {
           <View style={styles.quickPrompts}>
             <Text style={styles.quickPromptsLabel}>Tap to get started</Text>
             <View style={styles.quickPromptsGrid}>
-              {QUICK_PROMPTS.map(prompt => (
+              {QUICK_PROMPTS.map((prompt) => (
                 <TouchableOpacity
                   key={prompt}
                   style={styles.quickChip}
@@ -325,7 +349,10 @@ export default function AIChatScreen() {
                 editable={!loading}
               />
               <TouchableOpacity
-                style={[styles.sendBtn, (!input.trim() || loading) && styles.sendBtnDisabled]}
+                style={[
+                  styles.sendBtn,
+                  (!input.trim() || loading) && styles.sendBtnDisabled,
+                ]}
                 onPress={() => sendMessage()}
                 disabled={!input.trim() || loading}
               >
@@ -347,25 +374,25 @@ export default function AIChatScreen() {
 
 const bubbleStyles = StyleSheet.create({
   row: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
+    flexDirection: "row",
+    alignItems: "flex-end",
     marginBottom: 16,
     paddingHorizontal: 16,
     gap: 10,
   },
-  rowReverse: { flexDirection: 'row-reverse' },
+  rowReverse: { flexDirection: "row-reverse" },
   avatar: {
     width: 34,
     height: 34,
     borderRadius: 17,
-    backgroundColor: '#DCFCE7',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: "#DCFCE7",
+    justifyContent: "center",
+    alignItems: "center",
     flexShrink: 0,
   },
-  avatarText: { fontSize: 11, fontWeight: '800', color: GREEN_DARK },
+  avatarText: { fontSize: 11, fontWeight: "800", color: GREEN_DARK },
   bubble: {
-    maxWidth: '78%',
+    maxWidth: "78%",
     borderRadius: 18,
     paddingHorizontal: 16,
     paddingVertical: 12,
@@ -375,26 +402,26 @@ const bubbleStyles = StyleSheet.create({
     borderBottomRightRadius: 4,
   },
   aiBubble: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: "#FFFFFF",
     borderBottomLeftRadius: 4,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.06,
     shadowRadius: 4,
     elevation: 2,
   },
   text: { fontSize: 15, lineHeight: 22 },
-  userText: { color: '#FFFFFF' },
-  aiText: { color: '#111827' },
+  userText: { color: "#FFFFFF" },
+  aiText: { color: "#111827" },
 });
 
 const typingStyles = StyleSheet.create({
-  dots: { flexDirection: 'row', gap: 5, alignItems: 'center' },
+  dots: { flexDirection: "row", gap: 5, alignItems: "center" },
   dot: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#9CA3AF',
+    backgroundColor: "#9CA3AF",
   },
 });
 
@@ -402,50 +429,50 @@ const usageStyles = StyleSheet.create({
   container: {
     paddingHorizontal: 16,
     paddingVertical: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 10,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: "#FFFFFF",
     borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
+    borderBottomColor: "#F3F4F6",
   },
   track: {
     flex: 1,
     height: 4,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: "#E5E7EB",
     borderRadius: 2,
-    overflow: 'hidden',
+    overflow: "hidden",
   },
-  fill: { height: '100%', borderRadius: 2 },
-  label: { fontSize: 11, color: '#6B7280', fontWeight: '600', minWidth: 100 },
+  fill: { height: "100%", borderRadius: 2 },
+  label: { fontSize: 11, color: "#6B7280", fontWeight: "600", minWidth: 100 },
 });
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F9FAFB' },
+  container: { flex: 1, backgroundColor: "#F9FAFB" },
 
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: "#FFFFFF",
     borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
+    borderBottomColor: "#F3F4F6",
   },
-  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  headerLeft: { flexDirection: "row", alignItems: "center", gap: 12 },
   drAvatar: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#DCFCE7',
-    justifyContent: 'center',
-    alignItems: 'center',
-    position: 'relative',
+    backgroundColor: "#DCFCE7",
+    justifyContent: "center",
+    alignItems: "center",
+    position: "relative",
   },
-  drAvatarText: { fontSize: 13, fontWeight: '800', color: GREEN_DARK },
+  drAvatarText: { fontSize: 13, fontWeight: "800", color: GREEN_DARK },
   onlineDot: {
-    position: 'absolute',
+    position: "absolute",
     bottom: 2,
     right: 2,
     width: 10,
@@ -453,62 +480,62 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     backgroundColor: GREEN,
     borderWidth: 2,
-    borderColor: '#fff',
+    borderColor: "#fff",
   },
-  headerName: { fontSize: 16, fontWeight: '800', color: '#111827' },
-  headerSub: { fontSize: 12, color: '#6B7280', marginTop: 1 },
+  headerName: { fontSize: 16, fontWeight: "800", color: "#111827" },
+  headerSub: { fontSize: 12, color: "#6B7280", marginTop: 1 },
   clearBtn: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: '#F9FAFB',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: "#F9FAFB",
+    justifyContent: "center",
+    alignItems: "center",
   },
 
-  loadingCenter: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  loadingCenter: { flex: 1, justifyContent: "center", alignItems: "center" },
 
   messageList: { paddingTop: 20, paddingBottom: 8 },
 
   quickPrompts: { paddingHorizontal: 16, paddingBottom: 12 },
   quickPromptsLabel: {
     fontSize: 12,
-    color: '#9CA3AF',
-    fontWeight: '600',
+    color: "#9CA3AF",
+    fontWeight: "600",
     marginBottom: 10,
-    textAlign: 'center',
+    textAlign: "center",
   },
-  quickPromptsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  quickPromptsGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   quickChip: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: "#E5E7EB",
     borderRadius: 20,
     paddingHorizontal: 14,
     paddingVertical: 8,
   },
-  quickChipText: { fontSize: 13, color: '#374151', fontWeight: '500' },
+  quickChipText: { fontSize: 13, color: "#374151", fontWeight: "500" },
 
   inputBar: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
+    flexDirection: "row",
+    alignItems: "flex-end",
     paddingHorizontal: 12,
     paddingVertical: 10,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: "#FFFFFF",
     borderTopWidth: 1,
-    borderTopColor: '#F3F4F6',
+    borderTopColor: "#F3F4F6",
     gap: 8,
   },
   input: {
     flex: 1,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: "#F9FAFB",
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: "#E5E7EB",
     borderRadius: 24,
     paddingHorizontal: 16,
     paddingVertical: 10,
     fontSize: 15,
-    color: '#111827',
+    color: "#111827",
     maxHeight: 120,
   },
   sendBtn: {
@@ -516,20 +543,20 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: 22,
     backgroundColor: GREEN_DARK,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
-  sendBtnDisabled: { backgroundColor: '#D1FAE5' },
+  sendBtnDisabled: { backgroundColor: "#D1FAE5" },
 
   limitBanner: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 8,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: "#F3F4F6",
     borderRadius: 24,
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
-  limitBannerText: { flex: 1, fontSize: 13, color: '#6B7280' },
+  limitBannerText: { flex: 1, fontSize: 13, color: "#6B7280" },
 });

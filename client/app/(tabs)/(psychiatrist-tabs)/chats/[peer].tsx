@@ -72,7 +72,8 @@ export default function PsychiatristDirectChatScreen() {
   // NOTE: if bubbles still appear on the wrong side, check what field
   // chatStore.me uses. It must match the sender_id field coming back from
   // /api/messages. Common mismatch: store uses _id but component reads userId.
-  const currentUserId = me?.userId;
+  // In PsychiatristDirectChatScreen:
+  const currentUserId = me?._id ?? me?.userId;
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState("");
@@ -88,36 +89,46 @@ export default function PsychiatristDirectChatScreen() {
     "idle" | "calling" | "ringing" | "incall"
   >("idle");
   const [incomingCaller, setIncomingCaller] = useState<string | null>(null);
-
+  const peerNameFetched = useRef(false);
+  const getTokenRef = useRef(getToken);
+  useEffect(() => {
+    getTokenRef.current = getToken;
+  });
   // ── Resolve peer name ──────────────────────────────────────────────────
   useEffect(() => {
-    if (!peerId) return;
+    if (!peerId || peerNameFetched.current) return;
 
-    if (conversations && conversations.length > 0) {
+    if (conversations?.length > 0) {
       const match = conversations.find(
         (c: any) => c.peerId === peerId || c._id === peerId,
       );
       if (match?.peerName && match.peerName !== peerId) {
         setPeerName(match.peerName);
+        peerNameFetched.current = true;
         return;
       }
     }
 
+    peerNameFetched.current = true;
+
     const fetchPeerName = async () => {
       try {
-        const token = await getToken({ template: "backend" });
+        const token = await getTokenRef.current({ template: "backend" });
         if (!token) return;
         const { data } = await axios.get(`${API_URL}/api/users/${peerId}`, {
           headers: { Authorization: `Bearer ${token}` },
           timeout: 5000,
         });
         if (data?.full_name) setPeerName(data.full_name);
-      } catch {
-        // Silent fallback
+      } catch (e: any) {
+        if (e?.response?.status === 404) {
+          console.warn("[Chat] Peer user not found:", peerId);
+        }
       }
     };
+
     void fetchPeerName();
-  }, [peerId, conversations]);
+  }, [peerId]);
 
   // ── Load history ───────────────────────────────────────────────────────
   // FIX-A + FIX-B: use backend token; spread message directly like user chat does
@@ -128,7 +139,7 @@ export default function PsychiatristDirectChatScreen() {
     }
     try {
       setLoading(true);
-      const token = await getToken({ template: "backend" });
+      const token = await getTokenRef.current({ template: "backend" });
       if (!token) {
         setLoading(false);
         return;
@@ -139,16 +150,7 @@ export default function PsychiatristDirectChatScreen() {
         timeout: 10000,
       });
       if (Array.isArray(data)) {
-        // FIX-A: spread the message as-is (same as user chat).
-        // The API already returns sender_id / receiver_id / created_at.
-        // The old mapping (m.from → sender_id, m.timestamp → created_at)
-        // was only needed if the API returns a different shape — if your
-        // /api/messages endpoint returns { from, to, timestamp } you must
-        // keep the old mapping. Check your API response and use whichever
-        // branch matches. The user chat uses the spread, so mirroring it:
-        setMessages(
-          data.map((m: any) => ({ ...m, status: "sent" as const })),
-        );
+        setMessages(data.map((m: any) => ({ ...m, status: "sent" as const })));
         tempMessageIds.current.clear();
         setTimeout(
           () => flatListRef.current?.scrollToEnd({ animated: false }),
@@ -166,7 +168,7 @@ export default function PsychiatristDirectChatScreen() {
     } finally {
       setLoading(false);
     }
-  }, [peerId, getToken]);
+  }, [peerId]);
 
   // ── Send via REST ──────────────────────────────────────────────────────
   // FIX-B: always use { template: "backend" } so server can resolve MongoDB _id
@@ -180,7 +182,7 @@ export default function PsychiatristDirectChatScreen() {
 
     const optimistic: Message = {
       id: tempId,
-      sender_id: currentUserId ?? "me",
+      sender_id: currentUserId ?? "",
       receiver_id: peerId,
       content,
       created_at: new Date().toISOString(),
@@ -258,7 +260,8 @@ export default function PsychiatristDirectChatScreen() {
             sender_id: senderId,
             receiver_id: receiverId,
             content: msg.content,
-            created_at: msg.created_at ?? msg.timestamp ?? new Date().toISOString(),
+            created_at:
+              msg.created_at ?? msg.timestamp ?? new Date().toISOString(),
             status: "sent" as const,
           },
         ];
@@ -396,9 +399,7 @@ export default function PsychiatristDirectChatScreen() {
             ref={flatListRef}
             data={messages}
             keyExtractor={(item) =>
-              item.id.startsWith("temp")
-                ? `${item.id}-${item.status}`
-                : item.id
+              item.id.startsWith("temp") ? `${item.id}-${item.status}` : item.id
             }
             renderItem={renderMessage}
             contentContainerStyle={styles.chatList}
