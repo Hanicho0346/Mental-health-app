@@ -9,7 +9,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import image from "../assets/images/image.jpg";
+import image from "../assets/images/image-bg.jpg";
 const { height } = Dimensions.get('window');
 
   const WELCOME_IMAGE_URI = image;
