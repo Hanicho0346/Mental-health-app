@@ -5,7 +5,7 @@ import { Feather } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useState } from "react";
 import { useClerk } from "@clerk/clerk-expo";
-import { UpgradeModal } from '@/components/UpgradeModal';
+import { UpgradeModal } from "@/components/UpgradeModal";
 import {
   Alert,
   Modal,
@@ -157,10 +157,6 @@ function fmtDate(iso: string): string {
 
 // ─── Upgrade Modal ────────────────────────────────────────────────────────────
 
-
-
-
-
 // ─── Premier Benefits Card ────────────────────────────────────────────────────
 
 type PremierCardProps = {
@@ -224,7 +220,9 @@ function PremierCard({
             size={13}
             color={TIER_META[tier].color}
           />
-          <Text style={[premierStyles.tierLabel, { color: TIER_META[tier].color }]}>
+          <Text
+            style={[premierStyles.tierLabel, { color: TIER_META[tier].color }]}
+          >
             {TIER_META[tier].label.toUpperCase()}
           </Text>
         </View>
@@ -238,7 +236,9 @@ function PremierCard({
           style={premierStyles.pill}
           onPress={() => router.push("/aichat")}
         >
-          <View style={[premierStyles.pillIcon, { backgroundColor: "#F0FDF4" }]}>
+          <View
+            style={[premierStyles.pillIcon, { backgroundColor: "#F0FDF4" }]}
+          >
             <Feather name="message-circle" size={16} color="#16A34A" />
           </View>
           <Text style={premierStyles.pillLabel}>AI Chat</Text>
@@ -264,11 +264,18 @@ function PremierCard({
           style={premierStyles.pill}
           onPress={() => router.push("/streak")}
         >
-          <View style={[premierStyles.pillIcon, { backgroundColor: "#FFF7ED" }]}>
+          <View
+            style={[premierStyles.pillIcon, { backgroundColor: "#FFF7ED" }]}
+          >
             <Feather name="zap" size={16} color="#F59E0B" />
           </View>
           <Text style={premierStyles.pillLabel}>Streak</Text>
-          <Text style={[premierStyles.pillSub, { color: "#F59E0B", fontWeight: "800" }]}>
+          <Text
+            style={[
+              premierStyles.pillSub,
+              { color: "#F59E0B", fontWeight: "800" },
+            ]}
+          >
             {streakDays} days 🔥
           </Text>
         </TouchableOpacity>
@@ -278,7 +285,9 @@ function PremierCard({
           style={premierStyles.pill}
           onPress={() => router.push("/groupchats")}
         >
-          <View style={[premierStyles.pillIcon, { backgroundColor: "#EDE9FE" }]}>
+          <View
+            style={[premierStyles.pillIcon, { backgroundColor: "#EDE9FE" }]}
+          >
             <Feather name="users" size={16} color="#7C3AED" />
           </View>
           <Text style={premierStyles.pillLabel}>Groups</Text>
@@ -307,8 +316,8 @@ export default function ProfileScreen() {
       ]);
       if (!cancelled.value) {
         setMe(meRes.data);
-       
-useAuthStore.getState().setIsPremier(meRes.data.is_premier ?? false);
+        console.log("USER DATA:", meRes.data);
+        useAuthStore.getState().setIsPremier(meRes.data.is_premier ?? false);
         setAppointments(apptRes.data);
         setWallet(walletRes.data);
       }
@@ -330,7 +339,7 @@ useAuthStore.getState().setIsPremier(meRes.data.is_premier ?? false);
       return () => {
         cancelled.value = true;
       };
-    }, [])
+    }, []),
   );
 
   const { signOut } = useClerk();
@@ -401,7 +410,10 @@ useAuthStore.getState().setIsPremier(meRes.data.is_premier ?? false);
                   color={TIER_META[tier].color}
                 />
                 <Text
-                  style={[styles.heroBadgeText, { color: TIER_META[tier].color }]}
+                  style={[
+                    styles.heroBadgeText,
+                    { color: TIER_META[tier].color },
+                  ]}
                 >
                   {TIER_META[tier].label}
                 </Text>
@@ -425,8 +437,7 @@ useAuthStore.getState().setIsPremier(meRes.data.is_premier ?? false);
               </>
             ) : (
               <>
-                UPGRADE{" "}
-                <Text style={styles.amharicSectionTitle}>/ ያሻሽሉ</Text>
+                UPGRADE <Text style={styles.amharicSectionTitle}>/ ያሻሽሉ</Text>
               </>
             )}
           </Text>
@@ -571,8 +582,7 @@ useAuthStore.getState().setIsPremier(meRes.data.is_premier ?? false);
                         style={[
                           styles.txAmount,
                           {
-                            color:
-                              meta.sign === "+" ? "#16A34A" : "#EF4444",
+                            color: meta.sign === "+" ? "#16A34A" : "#EF4444",
                           },
                         ]}
                       >
@@ -614,8 +624,7 @@ useAuthStore.getState().setIsPremier(meRes.data.is_premier ?? false);
             </View>
             <View style={styles.rowTextContainer}>
               <Text style={styles.rowTitle}>
-                Email Address{" "}
-                <Text style={styles.amharicRowTitle}>/ ኢሜል</Text>
+                Email Address <Text style={styles.amharicRowTitle}>/ ኢሜል</Text>
               </Text>
               <Text style={styles.rowValue}>{me?.email ?? "—"}</Text>
             </View>
@@ -630,8 +639,7 @@ useAuthStore.getState().setIsPremier(meRes.data.is_premier ?? false);
             </View>
             <View style={styles.rowTextContainer}>
               <Text style={styles.rowTitle}>
-                National ID{" "}
-                <Text style={styles.amharicRowTitle}>/ መታወቂያ</Text>
+                National ID <Text style={styles.amharicRowTitle}>/ መታወቂያ</Text>
               </Text>
               <Text style={styles.rowValue}>{me?.national_id ?? "—"}</Text>
             </View>
@@ -662,8 +670,7 @@ useAuthStore.getState().setIsPremier(meRes.data.is_premier ?? false);
         {/* PREFERENCES SECTION */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>
-            PREFERENCES{" "}
-            <Text style={styles.amharicSectionTitle}>/ ምርጫዎች</Text>
+            PREFERENCES <Text style={styles.amharicSectionTitle}>/ ምርጫዎች</Text>
           </Text>
           <Text style={styles.sectionSubtitle}>Customize your experience</Text>
         </View>

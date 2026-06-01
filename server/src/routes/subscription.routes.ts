@@ -21,6 +21,7 @@ router.get(
   verifyPremierHandler
 );
 
+router.get('/chapa/callback', chapaSubscriptionCallbackHandler);
 router.post(
   '/chapa/callback',
   chapaSubscriptionCallbackHandler

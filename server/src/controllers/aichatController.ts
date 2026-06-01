@@ -35,62 +35,146 @@ export const sendMessage: RequestHandler = async (req, res) => {
       return;
     }
 
+    if (!process.env.GEMINI_API_KEY) {
+      logServerError('aiChat.gemini.noKey', {
+        hint: 'GEMINI_API_KEY is not set in the server environment',
+      });
+      res.status(503).json({ error: 'AI not configured' });
+      return;
+    }
+
     const geminiHistory = history.map((m: any) => ({
-      role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: m.content }],
+      author: m.role === 'assistant' ? 'assistant' : 'user',
+      content: [
+        {
+          type: 'text',
+          text: m.content,
+        },
+      ],
     }));
 
     geminiHistory.push({
-      role: 'user',
-      parts: [{ text: message.trim() }],
+      author: 'user',
+      content: [
+        {
+          type: 'text',
+          text: message.trim(),
+        },
+      ],
     });
 
-    // gemini-3.5-flash: current free-tier model (1.5-flash blocked for new projects since Apr 2025)
-    const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
-      {
+    function extractGeminiText(data: any): string | null {
+      if (!data || typeof data !== 'object') return null;
+      if (Array.isArray(data.candidates)) {
+        for (const candidate of data.candidates) {
+          if (Array.isArray(candidate.content)) {
+            for (const chunk of candidate.content) {
+              if (typeof chunk?.text === 'string') return chunk.text;
+              if (typeof chunk?.output_text === 'string') return chunk.output_text;
+            }
+          }
+          if (typeof candidate.output === 'string') return candidate.output;
+          if (typeof candidate.output_text === 'string') return candidate.output_text;
+        }
+      }
+      if (Array.isArray(data.output)) {
+        for (const item of data.output) {
+          if (Array.isArray(item.content)) {
+            for (const chunk of item.content) {
+              if (typeof chunk?.text === 'string') return chunk.text;
+              if (typeof chunk?.output_text === 'string') return chunk.output_text;
+            }
+          }
+        }
+      }
+      if (typeof data.output === 'string') return data.output;
+      return null;
+    }
+
+    async function callGemini(endpoint: string, body: unknown): Promise<{ status: number; ok: boolean; data: any; rawText: string }> {
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          system_instruction: {
-            parts: [{ text: SYSTEM_PROMPT }],
-          },
-          contents: geminiHistory,
-        }),
+        body: JSON.stringify(body),
+      });
+      const text = await res.text();
+      let parsed: any = null;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        parsed = text;
       }
-    );
+      return { status: res.status, ok: res.ok, data: parsed, rawText: text };
+    }
 
-    if (!geminiRes.ok) {
-      const errBody = await geminiRes.text();
-      logServerError('aiChat.gemini', { errorMessage: errBody });
+    const baseUrl = 'https://generativelanguage.googleapis.com/v1beta';
+    const apiKey = encodeURIComponent(process.env.GEMINI_API_KEY ?? '');
 
-      if (geminiRes.status === 429) {
+    const primaryEndpoint = `${baseUrl}/models/gemini-3.5-flash:generateContent?key=${apiKey}`;
+    const primaryBody = {
+      prompt: {
+        context: SYSTEM_PROMPT,
+        messages: geminiHistory,
+      },
+      temperature: 0.7,
+      maxOutputTokens: 512,
+      candidateCount: 1,
+    };
+
+    const fallbackEndpoint = `${baseUrl}2/models/gemini-3.5-flash:generateText?key=${apiKey}`;
+    const textPrompt = [
+      SYSTEM_PROMPT,
+      ...history.map((m: any) => `${m.role === 'assistant' ? 'Assistant' : 'User'}: ${m.content}`),
+      `User: ${message.trim()}`,
+    ].join('\n\n');
+    const fallbackBody = {
+      prompt: { text: textPrompt },
+      temperature: 0.7,
+      maxOutputTokens: 512,
+      candidateCount: 1,
+    };
+
+    const firstResult = await callGemini(primaryEndpoint, primaryBody);
+    let aiResponse: string | null = null;
+    let geminiData = firstResult.data;
+
+    if (firstResult.ok) {
+      aiResponse = extractGeminiText(geminiData);
+    }
+
+    if (!aiResponse) {
+      const fallbackResult = await callGemini(fallbackEndpoint, fallbackBody);
+      geminiData = fallbackResult.data;
+      if (fallbackResult.ok) {
+        aiResponse = extractGeminiText(geminiData);
+      }
+      if (!aiResponse) {
+        logServerError('aiChat.gemini', {
+          primary: {
+            endpoint: primaryEndpoint,
+            status: firstResult.status,
+            response: firstResult.data,
+            rawText: firstResult.rawText,
+          },
+          fallback: {
+            endpoint: fallbackEndpoint,
+            status: fallbackResult.status,
+            response: fallbackResult.data,
+            rawText: fallbackResult.rawText,
+          },
+        });
+      }
+    }
+
+    if (!aiResponse) {
+      const status = firstResult.status || 502;
+      if (firstResult.status === 429 || (firstResult.ok && geminiData?.error?.code === 429)) {
         res.status(503).json({
-          error:
-            'Dr. Selam is resting right now. Please try again in a few minutes. 🌙',
+          error: 'Dr. Selam is resting right now. Please try again in a few minutes. 🌙',
           retry_after: 60,
         });
         return;
       }
-
-      if (geminiRes.status === 404) {
-        // Model not found — likely API key doesn't have access to this model
-        logServerError('aiChat.gemini.modelNotFound', {
-          hint: 'Check your Gemini API key and ensure the model is available for your project',
-        });
-        res.status(502).json({ error: 'AI model unavailable' });
-        return;
-      }
-
-      res.status(502).json({ error: 'AI unavailable' });
-      return;
-    }
-
-    const geminiData = await geminiRes.json();
-    const aiResponse =
-      geminiData?.candidates?.[0]?.content?.parts?.[0]?.text;
-
-    if (!aiResponse) {
       res.status(502).json({ error: 'AI unavailable' });
       return;
     }

@@ -11,6 +11,7 @@
  *  4. Show success / error UI with appropriate CTA
  */
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/stores/authStore';
 import { Feather } from '@expo/vector-icons';
@@ -46,9 +47,11 @@ interface MeResponse {
 
 export default function PaymentReturnScreen() {
   const { tx_ref } = useLocalSearchParams<{ tx_ref: string }>();
+  const accessToken = useAuthStore((state) => state.accessToken);
   const [screenState, setScreenState] = useState<ScreenState>('verifying');
   const [errorMsg, setErrorMsg]       = useState('');
   const [expiresAt, setExpiresAt]     = useState<string | null>(null);
+  const [authReady, setAuthReady]     = useState(false);
 
   // Animation for success/error icon
   const scaleAnim = useRef(new Animated.Value(0)).current;
@@ -73,14 +76,22 @@ export default function PaymentReturnScreen() {
   // ── Verify on mount ────────────────────────────────────────────────────────
 
   useEffect(() => {
+    const unsub = useAuthStore.persist.onFinishHydration(() => setAuthReady(true));
+    if (useAuthStore.persist.hasHydrated()) setAuthReady(true);
+    return unsub;
+  }, []);
+
+  useEffect(() => {
     if (!tx_ref?.trim()) {
       setErrorMsg('Missing transaction reference. Please contact support if you were charged.');
       setScreenState('error');
       animateIn();
       return;
     }
+
+    if (!authReady) return;
     void verify(tx_ref.trim());
-  }, [tx_ref]);
+  }, [tx_ref, authReady]);
 
   async function verify(ref: string): Promise<void> {
     try {
@@ -93,7 +104,10 @@ export default function PaymentReturnScreen() {
 
       if (expires_at) setExpiresAt(expires_at);
 
-      // Step 2 — re-fetch /users/me to get latest is_premier flag
+      // Step 2 — clear the saved tx_ref if we verified from app resume
+      await AsyncStorage.removeItem('pendingSubscriptionTxRef');
+
+      // Step 3 — re-fetch /users/me to get latest is_premier flag
       // This is the source of truth; don't rely solely on the verify response
       try {
         const meRes = await api.get<MeResponse>('/users/me');

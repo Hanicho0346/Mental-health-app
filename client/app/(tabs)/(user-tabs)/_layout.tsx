@@ -2,19 +2,15 @@
 
 import { HapticTab } from "@/components/haptic-tab";
 import { isAdmin } from "@/lib/authGuards";
+import { api } from "@/lib/api";
 import { useAuthStore } from "@/stores/authStore";
 import { useChatStore } from "@/stores/chatStore";
 import { connectSocket } from "@/lib/chatService";
 import { Feather } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Redirect, Tabs } from "expo-router";
-import React, { useEffect, useMemo, useState } from "react";
-import {
-  ActivityIndicator,
-  Platform,
-  useWindowDimensions,
-  View,
-} from "react-native";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { AppState, AppStateStatus, ActivityIndicator, Platform, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "@clerk/clerk-expo";
 
@@ -26,6 +22,8 @@ export default function UserTabLayout() {
   const isPremier = useAuthStore((s) => s.isPremier); // ← read from store
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
+  const appStateRef = useRef(AppState.currentState);
+  const setIsPremier = useAuthStore((s) => s.setIsPremier);
 
   const compact = width < 380;
   const iconSize = compact ? 22 : 24;
@@ -45,6 +43,36 @@ export default function UserTabLayout() {
     };
     void setupSocket();
   }, [user, getToken]);
+
+  useEffect(() => {
+    const handleAppStateChange = async (nextState: AppStateStatus) => {
+      if (
+        appStateRef.current.match(/inactive|background/) &&
+        nextState === "active"
+      ) {
+        const txRef = await AsyncStorage.getItem("pendingSubscriptionTxRef");
+        if (txRef) {
+          try {
+            const { data } = await api.get<{ success?: boolean }>(
+              `/subscriptions/verify/${encodeURIComponent(txRef)}`
+            );
+            if (data.success || data.success === undefined) {
+              useAuthStore.getState().setIsPremier(true);
+              await AsyncStorage.removeItem("pendingSubscriptionTxRef");
+            }
+          } catch {
+            // ignore; payment will still be retried on the payment-return page
+          }
+        }
+      }
+      appStateRef.current = nextState;
+    };
+
+    const subscription = AppState.addEventListener("change", handleAppStateChange);
+    return () => {
+      subscription.remove();
+    };
+  }, []);
 
   const screenOptions = useMemo(() => {
     const bottomPad = Math.max(
@@ -158,6 +186,14 @@ export default function UserTabLayout() {
       />
       <Tabs.Screen
         name="payment-confirmation"
+        options={{
+          href: null,
+          headerShown: false,
+          tabBarStyle: { display: "none" },
+        }}
+      />
+      <Tabs.Screen
+        name="payment-return"
         options={{
           href: null,
           headerShown: false,

@@ -50,9 +50,15 @@ export default function LoginScreen() {
       }
 
       if (completedSignIn.status !== "complete") {
+        const statusHint =
+          completedSignIn.status === "needs_email_verification" ||
+          completedSignIn.status === "needs_verification"
+            ? "Email verification is required. Check your email and try again."
+            : `Sign-in status: ${completedSignIn.status}.`;
+
         Alert.alert(
           "Login failed",
-          "Sign-in not complete. Please verify your email or check your credentials.",
+          `${statusHint} Please verify your email or check your credentials.`,
         );
         return;
       }

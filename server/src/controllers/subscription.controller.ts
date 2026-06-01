@@ -6,7 +6,7 @@ import {
 } from '../services/subscription.service.js';
 import { User } from '../models/User.js';
 
-const BASE_URL = process.env.API_BASE_URL ?? 'http://localhost:4000';
+const BASE_URL = process.env.API_BASE_URL;
 const RETURN_URL = process.env.CHAPA_RETURN_URL ?? `${BASE_URL}/payment-return`;
 const WEBHOOK_SECRET = process.env.CHAPA_WEBHOOK_SECRET ?? '';
 
@@ -33,7 +33,7 @@ export const initiatePremierHandler: RequestHandler = async (req, res, next) => 
       callbackUrl: `${BASE_URL}/api/subscriptions/chapa/callback`,
       returnUrl: RETURN_URL,
     });
-
+   console.log("Initiate Premier Subscription Result:", result);
     res.json(result);
   } catch (err) {
     next(err);

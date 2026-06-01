@@ -12,6 +12,7 @@
  *  4. payment-return.tsx handles verification + isPremier update
  */
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { api } from '@/lib/api';
 import { getApiErrorMessage } from '@/lib/log';
 import { Feather } from '@expo/vector-icons';
@@ -55,9 +56,9 @@ export function UpgradeModal({ visible, onClose, onSuccess }: Props) {
       const res = await api.post<{ tx_ref: string; checkout_url: string }>(
         '/subscriptions/premier/initiate'
       );
-
+console.log("INITIATE RESPONSE:", res.data);
       const { checkout_url } = res.data;
-
+console.log("CHECKOUT URL:", checkout_url);
       if (!checkout_url) {
         Alert.alert('Error', 'No checkout URL returned. Please try again.');
         return;
@@ -75,6 +76,7 @@ export function UpgradeModal({ visible, onClose, onSuccess }: Props) {
         return;
       }
 
+      await AsyncStorage.setItem('pendingSubscriptionTxRef', res.data.tx_ref);
       await Linking.openURL(checkout_url);
       // → user completes payment in browser
       // → Chapa redirects to selamind://payment-return?tx_ref=...

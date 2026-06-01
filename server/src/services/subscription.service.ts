@@ -68,7 +68,35 @@ export async function verifyPremierSubscription(
   }
 
   if (existing.payment_status === 'paid') {
-    return { already_paid: true };
+    const user = await User.findById(existing.user_id).select(
+      'subscription_tier is_premier premier_expires_at'
+    ).lean();
+
+    if (!user?.is_premier || user.subscription_tier !== 'premier') {
+      const expiresAt = user?.premier_expires_at ?? new Date();
+      if (!user?.premier_expires_at) {
+        expiresAt.setMonth(expiresAt.getMonth() + 1);
+      }
+
+      await User.findByIdAndUpdate(existing.user_id, {
+        subscription_tier: 'premier',
+        is_premier: true,
+        premier_expires_at: expiresAt,
+        ai_chats_daily_limit: null,
+      });
+
+      return {
+        success: true,
+        already_paid: true,
+        expires_at: expiresAt,
+      };
+    }
+
+    return {
+      success: true,
+      already_paid: true,
+      expires_at: user?.premier_expires_at,
+    };
   }
 
   const verification = await verifyChapaPayment(tx_ref);

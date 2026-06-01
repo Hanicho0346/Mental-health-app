@@ -68,13 +68,16 @@ export default function RegisterScreen() {
       const { data } = await api.post<{ ok: boolean; url: string }>(
         "/auth/upload/certificate",
         formData,
-        { headers: { "Content-Type": "multipart/form-data" } }
+        { headers: { "Content-Type": "multipart/form-data" } },
       );
 
       setCertificateUrl(data.url);
       setCertificateUploaded(true);
     } catch (e: any) {
-      Alert.alert("Upload failed", e.message ?? "Could not upload certificate.");
+      Alert.alert(
+        "Upload failed",
+        e.message ?? "Could not upload certificate.",
+      );
     } finally {
       setUploading(false);
     }
@@ -83,7 +86,10 @@ export default function RegisterScreen() {
   async function handleRegister(): Promise<void> {
     if (!isLoaded || submitting) return;
     if (!role) {
-      Alert.alert("Choose an account type", "Please select user or psychiatrist.");
+      Alert.alert(
+        "Choose an account type",
+        "Please select user or psychiatrist.",
+      );
       return;
     }
     if (!fullName.trim() || !email.trim() || !password) {
@@ -115,7 +121,8 @@ export default function RegisterScreen() {
       await signUp?.prepareEmailAddressVerification({ strategy: "email_code" });
       setStep(3);
     } catch (e: any) {
-      const msg = e?.errors?.[0]?.longMessage ?? e?.message ?? "Registration failed";
+      const msg =
+        e?.errors?.[0]?.longMessage ?? e?.message ?? "Registration failed";
       Alert.alert("Registration failed", msg);
     } finally {
       setSubmitting(false);
@@ -124,7 +131,6 @@ export default function RegisterScreen() {
 
   async function handleVerifyOtp(): Promise<void> {
     if (!isLoaded || submitting) return;
-
     if (!otp.trim()) {
       Alert.alert("Enter code", "Please enter the verification code.");
       return;
@@ -137,41 +143,47 @@ export default function RegisterScreen() {
         code: otp.trim(),
       });
 
-      if (result?.status !== "complete" || !result.createdSessionId) {
-        Alert.alert("Verification failed", "Invalid verification code.");
+      if (result?.status !== "complete" || !result?.createdSessionId) {
+        const statusHint = result?.status
+          ? `Status: ${result.status}.`
+          : undefined;
+        Alert.alert(
+          "Verification failed",
+          `${statusHint ?? "Invalid or expired code."}`.trim(),
+        );
         return;
       }
 
       await setActive({ session: result.createdSessionId });
-      console.log("SESSION ACTIVATED");
 
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-
+      // Retry token fetch with longer wait + more attempts.
+      // Clerk may take a moment to activate the session on mobile.
       let token: string | null = null;
-
-      try {
-        token = await getToken({ template: "backend" });
-        console.log("BACKEND TOKEN:", token);
-      } catch (err) {
-        console.log("Backend token failed:", err);
-      }
-
-      if (!token) {
+      for (let attempt = 0; attempt < 10; attempt++) {
+        await new Promise((r) => setTimeout(r, 800));
         try {
-          token = await getToken();
-          console.log("DEFAULT TOKEN:", token);
+          token = await getToken({ skipCache: true });
+          if (token) break;
         } catch (err) {
-          console.log("Default token failed:", err);
+          console.log(`Token attempt ${attempt + 1} failed:`, err);
         }
       }
 
       if (!token) {
-        Alert.alert("Session error", "Could not obtain session token. Please login.");
-        router.replace("/login");
-        return;
+        try {
+          token = await getToken({ template: "backend", skipCache: true });
+        } catch (err) {
+          console.log("Backend template token failed:", err);
+        }
       }
 
-      console.log("TOKEN OK");
+      if (!token) {
+        Alert.alert(
+          "Session error",
+          "Your Clerk session is still activating. Please wait a moment and try again.",
+        );
+        return;
+      }
 
       const payload =
         role === "psychiatrist"
@@ -181,7 +193,6 @@ export default function RegisterScreen() {
               medical_license: licenseNumber.trim(),
               specialization: specialization.trim(),
               experience_years: parseInt(experience, 10) || 0,
-              // ...(certificateUrl ? { certificate_url: certificateUrl } : {}),
             }
           : {
               role: "user" as const,
@@ -189,12 +200,25 @@ export default function RegisterScreen() {
             };
 
       const { syncClerkWithBackend } = await import("@/lib/clerkBackendSync");
-      const syncResult = await syncClerkWithBackend(token, payload);
 
-      console.log("SYNC RESULT:", syncResult);
+      let syncResult;
+      try {
+        syncResult = await syncClerkWithBackend(token, payload);
+      } catch (syncErr: any) {
+        console.error("Sync error:", syncErr);
+        Alert.alert(
+          "Sync failed",
+          syncErr?.message ?? "Could not sync account. Please log in.",
+        );
+        router.replace("/login");
+        return;
+      }
 
       if (!syncResult?.user) {
-        Alert.alert("Sync failed", "Could not sync account.");
+        Alert.alert(
+          "Sync failed",
+          "Account created but profile sync failed. Please log in.",
+        );
         router.replace("/login");
         return;
       }
@@ -233,7 +257,10 @@ export default function RegisterScreen() {
 
             <TouchableOpacity
               style={s.roleCard}
-              onPress={() => { setRole("user"); setStep(2); }}
+              onPress={() => {
+                setRole("user");
+                setStep(2);
+              }}
             >
               <View style={s.roleIconCircle}>
                 <Feather name="user" size={28} color="#4ADE80" />
@@ -249,7 +276,10 @@ export default function RegisterScreen() {
 
             <TouchableOpacity
               style={s.roleCard}
-              onPress={() => { setRole("psychiatrist"); setStep(2); }}
+              onPress={() => {
+                setRole("psychiatrist");
+                setStep(2);
+              }}
             >
               <View style={s.roleIconCircle}>
                 <Feather name="briefcase" size={28} color="#4ADE80" />
@@ -292,7 +322,12 @@ export default function RegisterScreen() {
               <Feather name="mail" size={24} color="#4ADE80" />
             </View>
             <Text style={s.mainTitle}>Check your email</Text>
-            <Text style={[s.amharicMainTitle, { fontSize: 13, color: "#6B7280", fontWeight: "400" }]}>
+            <Text
+              style={[
+                s.amharicMainTitle,
+                { fontSize: 13, color: "#6B7280", fontWeight: "400" },
+              ]}
+            >
               We sent a 6-digit code to {email}
             </Text>
           </View>
@@ -303,7 +338,15 @@ export default function RegisterScreen() {
               <Text style={s.amharicLabel}>የማረጋገጫ ኮድ</Text>
               <View style={[s.inputContainer, { justifyContent: "center" }]}>
                 <TextInput
-                  style={[s.input, { textAlign: "center", fontSize: 24, letterSpacing: 8, fontWeight: "700" }]}
+                  style={[
+                    s.input,
+                    {
+                      textAlign: "center",
+                      fontSize: 24,
+                      letterSpacing: 8,
+                      fontWeight: "700",
+                    },
+                  ]}
                   placeholder="000000"
                   placeholderTextColor="#9CA3AF"
                   keyboardType="number-pad"
@@ -329,7 +372,11 @@ export default function RegisterScreen() {
 
           <TouchableOpacity
             style={{ alignItems: "center", marginTop: 16 }}
-            onPress={() => signUp?.prepareEmailAddressVerification({ strategy: "email_code" })}
+            onPress={() =>
+              signUp?.prepareEmailAddressVerification({
+                strategy: "email_code",
+              })
+            }
           >
             <Text style={{ color: "#4ADE80", fontSize: 14, fontWeight: "600" }}>
               Resend code
@@ -356,10 +403,16 @@ export default function RegisterScreen() {
       <ScrollView style={s.scroll}>
         <View style={s.logoSection}>
           <View style={s.iconCircle}>
-            <Feather name={role === "psychiatrist" ? "briefcase" : "user"} size={24} color="#4ADE80" />
+            <Feather
+              name={role === "psychiatrist" ? "briefcase" : "user"}
+              size={24}
+              color="#4ADE80"
+            />
           </View>
           <Text style={s.mainTitle}>
-            {role === "psychiatrist" ? "Join as Psychiatrist" : "Join SelamMind"}
+            {role === "psychiatrist"
+              ? "Join as Psychiatrist"
+              : "Join SelamMind"}
           </Text>
           <Text style={s.amharicMainTitle}>
             {role === "psychiatrist" ? "እንደ ባለሙያ ይመዝገቡ" : "ሰላምማይንድን ይቀላቀሉ"}
@@ -408,7 +461,11 @@ export default function RegisterScreen() {
                 onChangeText={setPassword}
               />
               <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
-                <Feather name={showPassword ? "eye" : "eye-off"} size={20} color="#6B7280" />
+                <Feather
+                  name={showPassword ? "eye" : "eye-off"}
+                  size={20}
+                  color="#6B7280"
+                />
               </TouchableOpacity>
             </View>
           </View>
@@ -416,9 +473,16 @@ export default function RegisterScreen() {
           {/* ── National ID (all roles) ── */}
           <View style={s.inputGroup}>
             <Text style={s.label}>National ID Number / የብሔራዊ መታወቂያ ቁጥር</Text>
-            <Text style={s.amharicLabel}>Required for identity verification</Text>
+            <Text style={s.amharicLabel}>
+              Required for identity verification
+            </Text>
             <View style={s.inputContainer}>
-              <Feather name="credit-card" size={16} color="#9CA3AF" style={{ marginRight: 8 }} />
+              <Feather
+                name="credit-card"
+                size={16}
+                color="#9CA3AF"
+                style={{ marginRight: 8 }}
+              />
               <TextInput
                 style={s.input}
                 placeholder="ID-12345678"
@@ -490,19 +554,29 @@ export default function RegisterScreen() {
                     color={certificateUploaded ? "#4ADE80" : "#9CA3AF"}
                   />
                 )}
-                <Text style={[s.uploadText, certificateUploaded && { color: "#4ADE80" }]}>
+                <Text
+                  style={[
+                    s.uploadText,
+                    certificateUploaded && { color: "#4ADE80" },
+                  ]}
+                >
                   {uploading
                     ? "Uploading..."
                     : certificateUploaded
-                    ? "Certificate Uploaded Successfully"
-                    : "Tap to upload medical certificate (PDF/JPG)"}
+                      ? "Certificate Uploaded Successfully"
+                      : "Tap to upload medical certificate (PDF/JPG)"}
                 </Text>
               </TouchableOpacity>
             </>
           )}
 
           <View style={s.infoBox}>
-            <Feather name="shield" size={16} color="#4B5563" style={{ marginTop: 2 }} />
+            <Feather
+              name="shield"
+              size={16}
+              color="#4B5563"
+              style={{ marginTop: 2 }}
+            />
             <Text style={[s.infoText, { marginLeft: 10 }]}>
               Your data is private and securely encrypted.
             </Text>
@@ -572,7 +646,12 @@ const s = StyleSheet.create({
     marginRight: 16,
   },
   roleTextContainer: { flex: 1 },
-  roleTitle: { fontSize: 18, fontWeight: "700", color: "#111827", marginBottom: 4 },
+  roleTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#111827",
+    marginBottom: 4,
+  },
   roleDescription: { fontSize: 13, color: "#6B7280", lineHeight: 18 },
   logoSection: { alignItems: "center", marginBottom: 24, marginTop: 10 },
   iconCircle: {
@@ -585,7 +664,12 @@ const s = StyleSheet.create({
     marginBottom: 12,
   },
   mainTitle: { fontSize: 22, fontWeight: "bold", color: "#111827" },
-  amharicMainTitle: { fontSize: 16, color: "#4ADE80", fontWeight: "bold", marginTop: 4 },
+  amharicMainTitle: {
+    fontSize: 16,
+    color: "#4ADE80",
+    fontWeight: "bold",
+    marginTop: 4,
+  },
   formCard: {
     backgroundColor: "#FFFFFF",
     borderRadius: 24,
@@ -596,11 +680,21 @@ const s = StyleSheet.create({
     shadowRadius: 15,
     elevation: 2,
   },
-  sectionTitle: { fontSize: 16, fontWeight: "700", color: "#111827", marginBottom: 16 },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#111827",
+    marginBottom: 16,
+  },
   divider: { height: 1, backgroundColor: "#F3F4F6", marginVertical: 20 },
   inputGroup: { marginBottom: 16 },
   label: { fontSize: 13, fontWeight: "600", color: "#374151", marginBottom: 8 },
-  amharicLabel: { fontSize: 11, color: "#6B7280", marginTop: 2, marginBottom: 8 },
+  amharicLabel: {
+    fontSize: 11,
+    color: "#6B7280",
+    marginTop: 2,
+    marginBottom: 8,
+  },
   inputContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -622,7 +716,12 @@ const s = StyleSheet.create({
     backgroundColor: "#F9FAFB",
     marginBottom: 16,
   },
-  uploadText: { fontSize: 13, color: "#6B7280", marginTop: 10, textAlign: "center" },
+  uploadText: {
+    fontSize: 13,
+    color: "#6B7280",
+    marginTop: 10,
+    textAlign: "center",
+  },
   infoBox: {
     flexDirection: "row",
     backgroundColor: "#FFFBEB",
@@ -647,5 +746,10 @@ const s = StyleSheet.create({
     marginTop: 24,
   },
   footerText: { color: "#6B7280", fontSize: 14 },
-  footerAction: { color: "#4ADE80", fontSize: 14, fontWeight: "bold", marginLeft: 6 },
+  footerAction: {
+    color: "#4ADE80",
+    fontSize: 14,
+    fontWeight: "bold",
+    marginLeft: 6,
+  },
 });
