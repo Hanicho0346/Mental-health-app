@@ -49,16 +49,31 @@ export default function LoginScreen() {
         });
       }
 
-      if (completedSignIn.status !== "complete") {
-        const statusHint =
-          completedSignIn.status === "needs_email_verification" ||
-          completedSignIn.status === "needs_verification"
-            ? "Email verification is required. Check your email and try again."
-            : `Sign-in status: ${completedSignIn.status}.`;
+      const completedStatus = completedSignIn.status as string | null;
 
+      if (completedStatus === "needs_second_factor") {
         Alert.alert(
           "Login failed",
-          `${statusHint} Please verify your email or check your credentials.`,
+          "This account requires two-factor authentication. Complete your second factor in Clerk or disable 2FA from your Clerk dashboard.",
+        );
+        return;
+      }
+
+      if (
+        completedStatus === "needs_email_verification" ||
+        completedStatus === "needs_verification"
+      ) {
+        Alert.alert(
+          "Login failed",
+          "Email verification is required. Check your inbox and verify your email before signing in.",
+        );
+        return;
+      }
+
+      if (completedStatus !== "complete") {
+        Alert.alert(
+          "Login failed",
+          `Sign-in status: ${completedStatus ?? "unknown"}. Please check your credentials or Clerk settings.`,
         );
         return;
       }

@@ -57,23 +57,31 @@ export async function syncClerkWithBackend(
   if (!res.ok) {
     const msg =
       typeof data === 'object' && data !== null
-        ? typeof (data as { error?: unknown }).error === 'string'
-          ? (data as { error?: unknown }).error as string
-          : typeof (data as { detail?: unknown }).detail === 'string'
-          ? (data as { detail?: unknown }).detail as string
-          : rawBody || `Could not sync account with server (HTTP ${res.status})`
+        ? ((typeof (data as { error?: unknown }).error === 'string'
+            ? (data as { error?: unknown }).error as string
+            : undefined) ??
+          (typeof (data as { detail?: unknown }).detail === 'string'
+            ? (data as { detail?: unknown }).detail as string
+            : undefined) ??
+          rawBody) || `Could not sync account with server (HTTP ${res.status})`
         : rawBody || `Could not sync account with server (HTTP ${res.status})`;
+    const detail =
+      typeof data === 'object' && data !== null
+        ? (data as { detail?: unknown }).detail
+        : undefined;
     logClientError('clerk.sync', new Error(msg), {
       status: res.status,
       apiBase: API_BASE,
       rawBody,
+      detail,
     });
-    throw new Error(msg);
+    throw new Error(detail ? `${msg} (${String(detail)})` : msg);
   }
 
-  const user = pickAuthUser((data as Record<string, unknown>).user as Record<string, unknown>);
-  const accessToken = String(data.accessToken ?? data.token ?? '');
-  const refreshToken = String(data.refreshToken ?? '');
+  const typedData = data as Record<string, unknown>;
+  const user = pickAuthUser(typedData.user as Record<string, unknown>);
+  const accessToken = String(typedData.accessToken ?? typedData.token ?? '');
+  const refreshToken = String(typedData.refreshToken ?? '');
 
   useAuthStore.getState().setSession({ accessToken, refreshToken, user });
   await AsyncStorage.multiSet([

@@ -8,7 +8,7 @@ function isInvalidClerkSessionError(message: string): boolean {
 }
 
 const POLL_INTERVAL_MS = 200;
-const POLL_TIMEOUT_MS = 12_000;
+const POLL_TIMEOUT_MS = 4_000;
 
 /**
  * Waits until Clerk's session is active and getToken() returns a non-null value.
@@ -59,9 +59,7 @@ export function useClerkBackendSession() {
       }
 
       if (!token) {
-        token = await waitForClerkToken(() =>
-          getToken({ skipCache: true }).catch(() => null)
-        );
+        token = await getToken({ skipCache: true }).catch(() => null);
       }
 
       if (!token?.trim()) {

@@ -16,7 +16,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import * as DocumentPicker from "expo-document-picker";
 import { resolvePostAuthRoute } from "@/lib/sessionRouting";
 import { api } from "@/lib/api";
-
+import { logClientError } from "@/lib/log";
 type Role = "user" | "psychiatrist" | null;
 type Step = 1 | 2 | 3;
 
@@ -104,7 +104,7 @@ export default function RegisterScreen() {
 
     setSubmitting(true);
     try {
-      await signUp?.create({
+      const signUpResult = await signUp?.create({
         emailAddress: email.trim(),
         password,
         firstName: fullName.trim().split(" ")[0],
@@ -118,11 +118,26 @@ export default function RegisterScreen() {
         },
       });
 
-      await signUp?.prepareEmailAddressVerification({ strategy: "email_code" });
+      if (__DEV__) {
+        console.log("Clerk signUp create result:", signUpResult);
+      }
+
+      if (!signUpResult) {
+        throw new Error("Clerk registration did not return a sign-up result.");
+      }
+
+      await signUpResult.prepareEmailAddressVerification({
+        strategy: "email_code",
+      });
       setStep(3);
     } catch (e: any) {
+      logClientError("register.handleRegister", e);
+      console.error("Clerk registration error:", e);
       const msg =
-        e?.errors?.[0]?.longMessage ?? e?.message ?? "Registration failed";
+        e?.errors?.[0]?.longMessage ??
+        e?.errors?.[0]?.message ??
+        e?.message ??
+        "Registration failed";
       Alert.alert("Registration failed", msg);
     } finally {
       setSubmitting(false);
@@ -156,25 +171,26 @@ export default function RegisterScreen() {
 
       await setActive({ session: result.createdSessionId });
 
-      // Retry token fetch with longer wait + more attempts.
-      // Clerk may take a moment to activate the session on mobile.
-      let token: string | null = null;
-      for (let attempt = 0; attempt < 10; attempt++) {
-        await new Promise((r) => setTimeout(r, 800));
+      async function fetchClerkToken(): Promise<string | null> {
+        try {
+          return await getToken({ template: "backend", skipCache: true });
+        } catch {
+          return null;
+        }
+      }
+
+      let token = await fetchClerkToken();
+      if (!token) {
         try {
           token = await getToken({ skipCache: true });
-          if (token) break;
-        } catch (err) {
-          console.log(`Token attempt ${attempt + 1} failed:`, err);
+        } catch {
+          token = null;
         }
       }
 
       if (!token) {
-        try {
-          token = await getToken({ template: "backend", skipCache: true });
-        } catch (err) {
-          console.log("Backend template token failed:", err);
-        }
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        token = await fetchClerkToken();
       }
 
       if (!token) {
