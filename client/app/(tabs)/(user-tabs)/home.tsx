@@ -270,7 +270,7 @@ export default function HomeScreen() {
             <Ionicons name="play-circle" size={48} color="#FFF" />
           </View>
           <View style={styles.videoTag}>
-            <Text style={styles.videoTagText}>{video.category}</Text>{" "}
+            <Text style={styles.videoTagText}>{video.category}</Text>
             {/* was video.tag */}
           </View>
         </TouchableOpacity>
@@ -279,7 +279,7 @@ export default function HomeScreen() {
             <Text style={styles.videoTitle}>{video.title}</Text>
             <Text style={styles.amharicVideoTitle}>
               {video.amharic_title}
-            </Text>{" "}
+            </Text>
             {/* was video.amharicTitle */}
             <Text style={styles.videoMeta}>
               <Feather name="headphones" size={12} color="#4ADE80" />{" "}
