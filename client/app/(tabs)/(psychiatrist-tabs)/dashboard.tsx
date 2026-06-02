@@ -1,5 +1,4 @@
 import { useAuthStore } from "@/stores/authStore";
-import { useAuth } from "@clerk/clerk-expo";
 import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
@@ -20,7 +19,6 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { uploadSupportVideo } from "@/lib/uploadSupportVideo";
-import { getStoredAuthToken } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { getSocket } from "@/lib/socket";
 
@@ -76,7 +74,6 @@ export default function DashboardScreen() {
   });
 
   // --- UPLOAD MODAL STATES ---
-  const { getToken } = useAuth();
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -202,11 +199,6 @@ export default function DashboardScreen() {
   };
 
   const handleUploadVideo = async () => {
-    const token =
-      (await getStoredAuthToken()) ??
-      (await getToken({ template: "backend" })) ??
-      (await getToken()) ??
-      undefined;
     if (!selectedVideo) {
       Alert.alert("Please select a video");
       return;
@@ -226,7 +218,6 @@ export default function DashboardScreen() {
         title: videoForm.title,
         amharicTitle: videoForm.amharicTitle,
         tag: videoForm.tag,
-        token,
         video: { uri: selectedVideo.uri, name: filename, type },
         onProgress: (p) => {
           setUploadProgress(p);

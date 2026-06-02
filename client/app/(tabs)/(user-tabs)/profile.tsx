@@ -392,7 +392,11 @@ export default function ProfileScreen() {
         {/* HERO CARD */}
         <View style={styles.heroCard}>
           <View style={styles.avatarContainer}>
-            <View style={styles.avatarCircle} />
+            <View style={styles.avatarCircle}>
+              <Text style={styles.avatarInitial}>
+                {me?.full_name?.trim()?.[0]?.toUpperCase() ?? "?"}
+              </Text>
+            </View>
             <View style={styles.activeDot} />
           </View>
           <View style={styles.heroNameRow}>
@@ -974,7 +978,14 @@ const styles = StyleSheet.create({
     width: 90,
     height: 90,
     borderRadius: 45,
-    backgroundColor: "#ECFCCB",
+    backgroundColor: "#4ADE80",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  avatarInitial: {
+    fontSize: 36,
+    fontWeight: "800",
+    color: "#FFFFFF",
   },
   activeDot: {
     position: "absolute",

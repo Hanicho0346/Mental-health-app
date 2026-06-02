@@ -250,7 +250,7 @@ class DoctorService {
     const folder = 'psychiatry_support_videos';
     const timestamp = Math.round(Date.now() / 1000);
     const signature = cloudinary.utils.api_sign_request(
-      { timestamp, folder, invalidate: false },
+      { timestamp, folder },
       env.cloudinary.apiSecret!
     );
     return {

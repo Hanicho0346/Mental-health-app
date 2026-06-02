@@ -1,6 +1,4 @@
-import axios from "axios";
-import { resolveApiBaseUrl } from "@/lib/resolveApiUrl";
-import { getStoredAuthToken } from "@/lib/auth";
+import { api } from "@/lib/api";
 
 export type UploadSupportVideoPayload = {
   title: string;
@@ -18,19 +16,17 @@ function apiBase(): string {
 export async function uploadSupportVideo(
   payload: UploadSupportVideoPayload,
 ): Promise<{ message?: string; video?: unknown }> {
-  const { title, amharicTitle, tag, video, token, onProgress } = payload;
+  const { title, amharicTitle, tag, video, onProgress } = payload;
 
-  const authToken = token ?? (await getStoredAuthToken());
-  const authHeaders = authToken ? { Authorization: `Bearer ${authToken}` } : {};
+  // 1. Get a signed upload signature — use `api` so token refresh works automatically
+  const { data: sig } = await api.get("/doctor/videos/sign");
 
-  // 1. Get a signed upload signature from our server
-  const { data: sig } = await axios.get(`${apiBase()}/api/doctor/videos/sign`, {
-    headers: authHeaders,
-  });
-
-  // 2. Upload directly to Cloudinary
+  // 2. Upload directly to Cloudinary using plain axios (no auth needed, goes to Cloudinary not our server)
   const fileName =
     video.name && video.name.includes(".") ? video.name : `video-${Date.now()}.mp4`;
+
+  // 2. Upload directly to Cloudinary using fetch (most compatible with React Native)
+  const cloudinaryUrl = `https://api.cloudinary.com/v1_1/${sig.cloudName}/video/upload`;
 
   const formData = new FormData();
   formData.append("file", { uri: video.uri, name: fileName, type: video.type ?? "video/mp4" } as any);
@@ -38,32 +34,28 @@ export async function uploadSupportVideo(
   formData.append("timestamp", String(sig.timestamp));
   formData.append("signature", sig.signature);
   formData.append("folder", sig.folder);
-  formData.append("eager", "");
 
-  const cloudinaryUrl = `https://api.cloudinary.com/v1_1/${sig.cloudName}/video/upload`;
-
-  const { data: uploaded } = await axios.post(cloudinaryUrl, formData, {
-    headers: { "Content-Type": "multipart/form-data" },
-    timeout: 10 * 60 * 1000,
-    onUploadProgress: (e) => {
-      if (e.total) onProgress?.(Math.min((e.loaded / e.total) * 0.95, 0.95));
-    },
+  const response = await fetch(cloudinaryUrl, {
+    method: "POST",
+    body: formData,
   });
 
+  if (!response.ok) {
+    const errText = await response.text().catch(() => response.status.toString());
+    throw new Error(`Cloudinary ${response.status}: ${errText}`);
+  }
+
+  const uploaded = await response.json() as { secure_url: string; public_id: string };
   onProgress?.(1);
 
-  // 3. Save the Cloudinary URL to our server
-  const { data } = await axios.post(
-    `${apiBase()}/api/doctor/videos/save`,
-    {
-      title,
-      amharicTitle,
-      tag,
-      videoUrl: uploaded.secure_url,
-      publicId: uploaded.public_id,
-    },
-    { headers: { ...authHeaders, "Content-Type": "application/json" } },
-  );
+  // 3. Save the Cloudinary URL — use `api` so token refresh works automatically
+  const { data } = await api.post("/doctor/videos/save", {
+    title,
+    amharicTitle,
+    tag,
+    videoUrl: uploaded.secure_url,
+    publicId: uploaded.public_id,
+  });
 
   return data;
 }

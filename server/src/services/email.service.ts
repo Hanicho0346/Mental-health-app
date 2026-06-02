@@ -27,8 +27,21 @@ export function isEmailConfigured(): boolean {
 
 export async function verifyEmailTransport(): Promise<void> {
   const t = getTransporter();
-  if (!t) return;
-  await t.verify();
+  if (!t) {
+    logServerWarn('email: transporter not created — SMTP_HOST/USER/PASS/FROM missing or blank');
+    return;
+  }
+  try {
+    await t.verify();
+    logServerInfo('email: SMTP connection verified OK', { host: env.smtp.host, port: env.smtp.port });
+  } catch (err) {
+    logServerError('email: SMTP verify failed — emails will NOT send', err, {
+      host: env.smtp.host,
+      port: env.smtp.port,
+      user: env.smtp.user,
+      secure: env.smtp.secure,
+    });
+  }
 }
 
 export function warnIfVerificationEmailDisabled(): void {
@@ -61,7 +74,7 @@ export async function sendVerificationCodeToRegisteredEmail(
       text,
       html,
     },
-    { required: env.nodeEnv === 'production' }
+    { required: false }
   );
 }
 
@@ -101,7 +114,9 @@ export async function sendMail(
     logServerInfo('email: sent to registered address', { to, subject: options.subject });
   } catch (err) {
     logServerError('email: send failed', err, { to, subject: options.subject });
-    throw new AppError(503, 'Failed to send email. Check SMTP_USER and SMTP_PASS in server/.env.');
+    if (opts?.required) {
+      throw new AppError(503, 'Failed to send email. Check SMTP_USER and SMTP_PASS in server/.env.');
+    }
   }
 }
 

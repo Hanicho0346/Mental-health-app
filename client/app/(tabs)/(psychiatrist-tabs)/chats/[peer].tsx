@@ -155,7 +155,11 @@ export default function PsychiatristDirectChatScreen() {
         timeout: 10000,
       });
       if (Array.isArray(data)) {
-        setMessages(data.map((m: any) => ({ ...m, status: "sent" as const })));
+        const seen = new Set<string>();
+        const unique = data
+          .map((m: any) => ({ ...m, id: m.id ?? m._id?.toString(), status: "sent" as const }))
+          .filter((m) => { if (seen.has(m.id)) return false; seen.add(m.id); return true; });
+        setMessages(unique);
         tempMessageIds.current.clear();
         setTimeout(
           () => flatListRef.current?.scrollToEnd({ animated: false }),
@@ -217,9 +221,12 @@ export default function PsychiatristDirectChatScreen() {
 
       setMessages((prev) => {
         tempMessageIds.current.delete(tempId);
-        return prev.map((m) =>
-          m.id === tempId ? { ...data, status: "sent" as const } : m,
+        const updated = prev.map((m) =>
+          m.id === tempId ? { ...data, id: data.id ?? data._id?.toString(), status: "sent" as const } : m,
         );
+        // deduplicate by id in case socket already delivered this message
+        const seen = new Set<string>();
+        return updated.filter((m) => { if (seen.has(m.id)) return false; seen.add(m.id); return true; });
       });
     } catch (err: any) {
       const errMsg =
@@ -405,9 +412,7 @@ export default function PsychiatristDirectChatScreen() {
           <FlatList
             ref={flatListRef}
             data={messages}
-            keyExtractor={(item) =>
-              item.id.startsWith("temp") ? `${item.id}-${item.status}` : item.id
-            }
+    keyExtractor={(item) => item.id}
             renderItem={renderMessage}
             contentContainerStyle={styles.chatList}
             onContentSizeChange={() =>

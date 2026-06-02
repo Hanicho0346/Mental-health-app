@@ -163,6 +163,7 @@ async function issueEmailVerificationOtp(
     { _id: userId },
     { $set: { email_verification_otp_hash: hash, email_verification_otp_expires_at: exp } }
   );
+  console.log(`[OTP] Verification code for ${registeredEmail}: ${code}`);
   await sendVerificationCodeToRegisteredEmail(registeredEmail, code);
 }
 

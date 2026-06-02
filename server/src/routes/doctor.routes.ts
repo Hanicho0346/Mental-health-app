@@ -28,10 +28,10 @@ router.get('/appointments/date', ...doctorGate, getAppointmentsByDate);
 router.get('/appointments', ...doctorGate, getAppointmentsByDate);
 router.get('/patients/:patientId', ...doctorGate, getPatientProfile);
 router.get('/patients', ...doctorGate, getPatients);
-router.post('/videos/:id/listen', requireAuth, incrementVideoListen);
-router.post('/videos/:id/toggle-favorite', requireAuth, toggleVideoFavorite);
 router.get('/videos/sign', ...doctorGate, getCloudinarySignature);
 router.post('/videos/save', ...doctorGate, saveVideoRecord);
-router.get('/videos', requireAuth, getSupportVideos);
+router.get('/videos', getSupportVideos);
+router.post('/videos/:id/listen', incrementVideoListen);
+router.post('/videos/:id/toggle-favorite', requireAuth, toggleVideoFavorite);
 
 export default router;

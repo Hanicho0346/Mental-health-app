@@ -84,11 +84,18 @@ export default function RegisterScreen() {
   async function handleRegister(): Promise<void> {
     if (submitting) return;
     if (!role) {
-      Alert.alert("Choose an account type", "Please select user or psychiatrist.");
+      Alert.alert(
+        "Choose an account type",
+        "Please select user or psychiatrist.",
+      );
       return;
     }
     if (!fullName.trim() || !email.trim() || !password) {
       Alert.alert("Missing fields", "Please complete all required fields.");
+      return;
+    }
+    if (password.length < 8) {
+      Alert.alert("Weak password", "Password must be at least 8 characters.");
       return;
     }
     if (!nationalId.trim()) {
@@ -114,14 +121,20 @@ export default function RegisterScreen() {
         password,
         role: role ?? undefined,
         national_id: nationalId.trim(),
-        medical_license: role === "psychiatrist" ? licenseNumber.trim() : undefined,
-        specialization: role === "psychiatrist" ? specialization.trim() : undefined,
-        experience_years: role === "psychiatrist" ? (parseInt(experience, 10) || 0) : undefined,
+        medical_license:
+          role === "psychiatrist" ? licenseNumber.trim() : undefined,
+        specialization:
+          role === "psychiatrist" ? specialization.trim() : undefined,
+        experience_years:
+          role === "psychiatrist" ? parseInt(experience, 10) || 0 : undefined,
         certificate_url: certificateUrl ?? undefined,
       });
 
       if ("needsVerification" in data && data.needsVerification) {
-        router.replace({ pathname: "/verify-email", params: { email: data.email } });
+        router.replace({
+          pathname: "/verify-email",
+          params: { email: data.email },
+        });
         return;
       }
 
@@ -279,7 +292,7 @@ export default function RegisterScreen() {
             <View style={s.inputContainer}>
               <TextInput
                 style={s.input}
-                placeholder="••••••••"
+                placeholder="Min. 8 characters"
                 secureTextEntry={!showPassword}
                 placeholderTextColor="#9CA3AF"
                 value={password}
