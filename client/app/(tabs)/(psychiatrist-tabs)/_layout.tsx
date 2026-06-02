@@ -2,6 +2,7 @@ import { HapticTab } from "@/components/haptic-tab";
 import { isRejectedPsychiatrist } from "@/lib/authGuards";
 import { useAuthStore } from "@/stores/authStore";
 import { useChatStore } from "@/stores/chatStore";
+import { getStoredAuthToken } from "@/lib/auth";
 import { connectSocket } from "@/lib/chatService";
 import { Feather } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -27,7 +28,9 @@ export default function PsychiatristTabLayout() {
 
     const setupSocket = async () => {
       const username = user.full_name?.trim() || user.id;
-      const token = await getToken({ template: "backend" });
+      const token =
+        (await getStoredAuthToken()) ??
+        (await getToken({ template: "backend" }));
       useChatStore.getState().setMe({
         _id: user.id,
         userId: user.id,

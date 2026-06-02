@@ -1,16 +1,17 @@
-import fs from 'fs/promises';
 import { v2 as cloudinary } from 'cloudinary';
 import mongoose from 'mongoose';
-import { configureCloudinary, isCloudinaryConfigured } from './cloudinary.service.js';
+import { configureCloudinary } from './cloudinary.service.js';
+import { env } from '../config/env.js';
 import db from '../models/index.js';
 
 configureCloudinary();
 
-interface UploadVideoData {
+interface SaveVideoData {
   title: string;
   amharicTitle: string;
   tag: string;
-  file: Express.Multer.File;
+  videoUrl: string;
+  publicId?: string;
 }
 
 type PopulatedPatient = {
@@ -70,18 +71,6 @@ export type DoctorPatientListItemDto = {
 export type DoctorPatientProfileDto = DoctorPatientListItemDto & {
   email: string;
 };
-
-async function safeUnlinkTemp(filePath: string | undefined): Promise<void> {
-  if (!filePath) return;
-  try {
-    await fs.unlink(filePath);
-  } catch (err) {
-    const code = err && typeof err === 'object' && 'code' in err ? String((err as { code?: string }).code) : '';
-    if (code !== 'ENOENT') {
-      console.warn('doctor.uploadVideoData: failed to remove temp upload', err);
-    }
-  }
-}
 
 function formatTimeAgo(date: Date): string {
   const seconds = Math.floor((Date.now() - new Date(date).getTime()) / 1000);
@@ -251,88 +240,42 @@ class DoctorService {
     };
   }
 
- async uploadVideoData(
-  doctorId: string,
-  videoData: UploadVideoData,
-): Promise<Record<string, unknown>> {
-  const { title, amharicTitle, tag, file } = videoData;
-
-  if (!file?.path) {
-    throw new Error('Upload file path missing');
-  }
-
-  try {
-    console.log('Uploading video to Cloudinary:', file.path);
-
- const uploaded = await cloudinary.uploader.upload(file.path, {
-  resource_type: 'video',
-  folder: 'psychiatry_support_videos',
-  timeout: 120000,
-});
-
-    console.log('Cloudinary upload response:', uploaded);
-
-    if (!uploaded) {
-      throw new Error('Cloudinary returned empty response');
-    }
-
-    const videoUrl =
-      uploaded.secure_url ||
-      uploaded.url ||
-      uploaded.playback_url;
-
-    if (!videoUrl) {
-      console.error('Invalid Cloudinary response:', uploaded);
-
-      throw new Error(
-        'Cloudinary upload succeeded but no video URL returned',
-      );
-    }
-
-    const docPayload = {
-      doctor_id: new mongoose.Types.ObjectId(doctorId),
-      title: title.trim() || 'Untitled',
-      amharic_title: amharicTitle.trim(),
-      category: tag.trim(),
-      video_url: videoUrl,
-    };
-
-    const newVideo = await db.Video.create(docPayload);
-
-    return newVideo.toObject();
-  } catch (err: any) {
-    console.error('Cloudinary Upload Error Details:', err);
-
-    if (
-      err?.message?.includes('provider_unavailable') ||
-      err?.error?.error_type === 'provider_unavailable'
-    ) {
-      throw new Error(
-        'Cloudinary service unavailable - check CLOUDINARY credentials or network connectivity',
-      );
-    }
-
-    if (err?.http_code === 401) {
-      throw new Error(
-        'Invalid Cloudinary credentials',
-      );
-    }
-
-    if (err?.http_code === 400) {
-      throw new Error(
-        err?.message || 'Invalid video upload request',
-      );
-    }
-
-    throw new Error(
-      err instanceof Error
-        ? err.message
-        : 'Failed to upload video to Cloudinary',
+ async generateUploadSignature(): Promise<{
+    signature: string;
+    timestamp: number;
+    cloudName: string;
+    apiKey: string;
+    folder: string;
+  }> {
+    const folder = 'psychiatry_support_videos';
+    const timestamp = Math.round(Date.now() / 1000);
+    const signature = cloudinary.utils.api_sign_request(
+      { timestamp, folder, invalidate: false },
+      env.cloudinary.apiSecret!
     );
-  } finally {
-    await safeUnlinkTemp(file.path);
+    return {
+      signature,
+      timestamp,
+      cloudName: env.cloudinary.cloudName!,
+      apiKey: env.cloudinary.apiKey!,
+      folder,
+    };
   }
-}
+
+  async saveVideoRecord(
+    doctorId: string,
+    data: SaveVideoData,
+  ): Promise<Record<string, unknown>> {
+    const newVideo = await db.Video.create({
+      doctor_id: new mongoose.Types.ObjectId(doctorId),
+      title: data.title.trim() || 'Untitled',
+      amharic_title: data.amharicTitle.trim(),
+      category: data.tag.trim(),
+      video_url: data.videoUrl,
+      public_id: data.publicId,
+    });
+    return newVideo.toObject();
+  }
   async getSupportVideos(): Promise<Record<string, unknown>[]> {
   const videos = await db.Video.find()
     .sort({ createdAt: -1 })

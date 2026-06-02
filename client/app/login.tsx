@@ -1,9 +1,10 @@
-import { useSignIn } from "@clerk/clerk-expo";
-import { useClerkBackendSession } from "@/hooks/useClerkBackendSession";
+import { api } from "@/lib/api";
+import { getApiErrorMessage, logClientError } from "@/lib/log";
 import { resolvePostAuthRoute } from "@/lib/sessionRouting";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useState } from "react";
+import { useAuthStore } from "@/stores/authStore";
 import { useChatStore } from "@/stores/chatStore";
 import {
   ActivityIndicator,
@@ -18,101 +19,67 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function LoginScreen() {
-  const { signIn, setActive, isLoaded } = useSignIn();
-  const { syncSession } = useClerkBackendSession();
+  const setSession = useAuthStore((state) => state.setSession);
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   async function handleLogin() {
-    if (!isLoaded || submitting) return;
+    if (submitting) return;
     if (!email.trim() || !password) {
       Alert.alert("Login failed", "Please enter both email and password.");
       return;
     }
 
+    setSubmitting(true);
     try {
-      setSubmitting(true);
-
-      const signInResult = await signIn.create({
-        identifier: email.trim(),
+      const { data } = await api.post<{
+        accessToken: string;
+        refreshToken: string;
+        user: Record<string, unknown>;
+      }>('/auth/login', {
+        email: email.trim(),
         password,
       });
 
-      let completedSignIn = signInResult;
-
-      if (signInResult.status === "needs_first_factor") {
-        completedSignIn = await signIn.attemptFirstFactor({
-          strategy: "password",
-          password,
-        });
+      if (!data.accessToken || !data.refreshToken || !data.user) {
+        throw new Error('Login response was invalid.');
       }
 
-      const completedStatus = completedSignIn.status as string | null;
-
-      if (completedStatus === "needs_second_factor") {
-        Alert.alert(
-          "Login failed",
-          "This account requires two-factor authentication. Complete your second factor in Clerk or disable 2FA from your Clerk dashboard.",
-        );
-        return;
-      }
-
-      if (
-        completedStatus === "needs_email_verification" ||
-        completedStatus === "needs_verification"
-      ) {
-        Alert.alert(
-          "Login failed",
-          "Email verification is required. Check your inbox and verify your email before signing in.",
-        );
-        return;
-      }
-
-      if (completedStatus !== "complete") {
-        Alert.alert(
-          "Login failed",
-          `Sign-in status: ${completedStatus ?? "unknown"}. Please check your credentials or Clerk settings.`,
-        );
-        return;
-      }
-
-      const sessionId = completedSignIn.createdSessionId;
-      if (!sessionId) {
-        Alert.alert("Login failed", "No session created by Clerk.");
-        return;
-      }
-
-      await setActive({ session: sessionId });
-
-      const { user, error: syncError } = await syncSession();
-      if (!user) {
-        Alert.alert("Login failed", syncError ?? "Backend sync failed.");
-        return;
-      }
+      setSession({
+        accessToken: String(data.accessToken),
+        refreshToken: String(data.refreshToken),
+        user: data.user,
+      });
 
       useChatStore.getState().setMe({
-        _id: user.id,
-        userId: user.id,
-        username: user.full_name,
-        full_name: user.full_name,
-        email: user.email,
+        _id: String(data.user.id ?? ''),
+        userId: String(data.user.id ?? ''),
+        username: String(data.user.full_name ?? ''),
+        full_name: String(data.user.full_name ?? ''),
+        email: String(data.user.email ?? ''),
       });
 
       requestAnimationFrame(() => {
-        router.replace(resolvePostAuthRoute(user));
+        router.replace(resolvePostAuthRoute(data.user));
       });
-    } catch (e: any) {
-      Alert.alert(
-        "Login Error",
-        e?.errors?.[0]?.message || e?.message || "Failed",
-      );
+    } catch (e: unknown) {
+      logClientError('login.handleLogin', e);
+      const msg = getApiErrorMessage(e);
+      if (/not verified/i.test(msg)) {
+        Alert.alert('Email not verified', 'Please verify your email before logging in.');
+        router.replace({ pathname: '/verify-email', params: { email: email.trim() } });
+        return;
+      }
+      Alert.alert('Login failed', msg);
     } finally {
       setSubmitting(false);
     }
   }
 
+  // ── Credentials Screen ────────────────────────────────────────────────────
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -125,10 +92,7 @@ export default function LoginScreen() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView
-        style={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
+      <ScrollView style={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <View style={styles.logoSection}>
           <View style={styles.iconCircle}>
             <Feather name="shield" size={24} color="#4ADE80" />
@@ -171,11 +135,7 @@ export default function LoginScreen() {
                 onSubmitEditing={() => void handleLogin()}
               />
               <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
-                <Feather
-                  name={showPassword ? "eye" : "eye-off"}
-                  size={20}
-                  color="#6B7280"
-                />
+                <Feather name={showPassword ? "eye" : "eye-off"} size={20} color="#6B7280" />
               </TouchableOpacity>
             </View>
           </View>
@@ -246,12 +206,7 @@ const styles = StyleSheet.create({
     borderColor: "#FFF",
   },
   mainTitle: { fontSize: 22, fontWeight: "bold", color: "#111827" },
-  amharicMainTitle: {
-    fontSize: 16,
-    color: "#4ADE80",
-    fontWeight: "bold",
-    marginTop: 4,
-  },
+  amharicMainTitle: { fontSize: 16, color: "#4ADE80", fontWeight: "bold", marginTop: 4 },
   formCard: {
     backgroundColor: "#FFFFFF",
     borderRadius: 24,
@@ -264,12 +219,7 @@ const styles = StyleSheet.create({
   },
   inputGroup: { marginBottom: 20 },
   label: { fontSize: 14, fontWeight: "600", color: "#111827" },
-  amharicLabel: {
-    fontSize: 11,
-    color: "#6B7280",
-    marginTop: 2,
-    marginBottom: 8,
-  },
+  amharicLabel: { fontSize: 11, color: "#6B7280", marginTop: 2, marginBottom: 8 },
   inputContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -303,10 +253,5 @@ const styles = StyleSheet.create({
     marginTop: 24,
   },
   footerText: { color: "#6B7280", fontSize: 14 },
-  footerAction: {
-    color: "#4ADE80",
-    fontSize: 14,
-    fontWeight: "bold",
-    marginLeft: 6,
-  },
+  footerAction: { color: "#4ADE80", fontSize: 14, fontWeight: "bold", marginLeft: 6 },
 });

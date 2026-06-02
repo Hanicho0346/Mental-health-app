@@ -1,5 +1,4 @@
 import { Feather, Ionicons } from "@expo/vector-icons";
-import { useAuth, useSignUp } from "@clerk/clerk-expo";
 import { router } from "expo-router";
 import React, { useState } from "react";
 import {
@@ -16,13 +15,13 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import * as DocumentPicker from "expo-document-picker";
 import { resolvePostAuthRoute } from "@/lib/sessionRouting";
 import { api } from "@/lib/api";
-import { logClientError } from "@/lib/log";
+import { getApiErrorMessage, logClientError } from "@/lib/log";
+import { useAuthStore, type AuthUser } from "@/stores/authStore";
 type Role = "user" | "psychiatrist" | null;
-type Step = 1 | 2 | 3;
+type Step = 1 | 2;
 
 export default function RegisterScreen() {
-  const { signUp, setActive, isLoaded } = useSignUp();
-  const { getToken } = useAuth();
+  const setSession = useAuthStore((state) => state.setSession);
 
   const [step, setStep] = useState<Step>(1);
   const [role, setRole] = useState<Role>(null);
@@ -30,7 +29,6 @@ export default function RegisterScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [otp, setOtp] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   // Shared field
@@ -84,19 +82,15 @@ export default function RegisterScreen() {
   }
 
   async function handleRegister(): Promise<void> {
-    if (!isLoaded || submitting) return;
+    if (submitting) return;
     if (!role) {
-      Alert.alert(
-        "Choose an account type",
-        "Please select user or psychiatrist.",
-      );
+      Alert.alert("Choose an account type", "Please select user or psychiatrist.");
       return;
     }
     if (!fullName.trim() || !email.trim() || !password) {
       Alert.alert("Missing fields", "Please complete all required fields.");
       return;
     }
-    // National ID required for both roles
     if (!nationalId.trim()) {
       Alert.alert("Missing field", "Please enter your National ID number.");
       return;
@@ -104,147 +98,46 @@ export default function RegisterScreen() {
 
     setSubmitting(true);
     try {
-      const signUpResult = await signUp?.create({
-        emailAddress: email.trim(),
+      const { data } = await api.post<
+        | {
+            needsVerification: true;
+            email: string;
+          }
+        | {
+            accessToken: string;
+            refreshToken: string;
+            user: AuthUser;
+          }
+      >("/auth/register", {
+        full_name: fullName.trim(),
+        email: email.trim(),
         password,
-        firstName: fullName.trim().split(" ")[0],
-        lastName: fullName.trim().split(" ").slice(1).join(" ") || "",
-        unsafeMetadata: {
-          role,
-          national_id: nationalId.trim(),
-          ...(role === "psychiatrist" && certificateUrl
-            ? { certificate_url: certificateUrl }
-            : {}),
-        },
+        role: role ?? undefined,
+        national_id: nationalId.trim(),
+        medical_license: role === "psychiatrist" ? licenseNumber.trim() : undefined,
+        specialization: role === "psychiatrist" ? specialization.trim() : undefined,
+        experience_years: role === "psychiatrist" ? (parseInt(experience, 10) || 0) : undefined,
+        certificate_url: certificateUrl ?? undefined,
       });
 
-      if (__DEV__) {
-        console.log("Clerk signUp create result:", signUpResult);
+      if ("needsVerification" in data && data.needsVerification) {
+        router.replace({ pathname: "/verify-email", params: { email: data.email } });
+        return;
       }
 
-      if (!signUpResult) {
-        throw new Error("Clerk registration did not return a sign-up result.");
-      }
-
-      await signUpResult.prepareEmailAddressVerification({
-        strategy: "email_code",
+      setSession({
+        accessToken: String(data.accessToken),
+        refreshToken: String(data.refreshToken),
+        user: data.user,
       });
-      setStep(3);
-    } catch (e: any) {
+
+      requestAnimationFrame(() => {
+        router.replace(resolvePostAuthRoute(data.user));
+      });
+    } catch (e: unknown) {
       logClientError("register.handleRegister", e);
-      console.error("Clerk registration error:", e);
-      const msg =
-        e?.errors?.[0]?.longMessage ??
-        e?.errors?.[0]?.message ??
-        e?.message ??
-        "Registration failed";
+      const msg = getApiErrorMessage(e);
       Alert.alert("Registration failed", msg);
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  async function handleVerifyOtp(): Promise<void> {
-    if (!isLoaded || submitting) return;
-    if (!otp.trim()) {
-      Alert.alert("Enter code", "Please enter the verification code.");
-      return;
-    }
-
-    setSubmitting(true);
-
-    try {
-      const result = await signUp?.attemptEmailAddressVerification({
-        code: otp.trim(),
-      });
-
-      if (result?.status !== "complete" || !result?.createdSessionId) {
-        const statusHint = result?.status
-          ? `Status: ${result.status}.`
-          : undefined;
-        Alert.alert(
-          "Verification failed",
-          `${statusHint ?? "Invalid or expired code."}`.trim(),
-        );
-        return;
-      }
-
-      await setActive({ session: result.createdSessionId });
-
-      async function fetchClerkToken(): Promise<string | null> {
-        try {
-          return await getToken({ template: "backend", skipCache: true });
-        } catch {
-          return null;
-        }
-      }
-
-      let token = await fetchClerkToken();
-      if (!token) {
-        try {
-          token = await getToken({ skipCache: true });
-        } catch {
-          token = null;
-        }
-      }
-
-      if (!token) {
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        token = await fetchClerkToken();
-      }
-
-      if (!token) {
-        Alert.alert(
-          "Session error",
-          "Your Clerk session is still activating. Please wait a moment and try again.",
-        );
-        return;
-      }
-
-      const payload =
-        role === "psychiatrist"
-          ? {
-              role: "psychiatrist" as const,
-              national_id: nationalId.trim(),
-              medical_license: licenseNumber.trim(),
-              specialization: specialization.trim(),
-              experience_years: parseInt(experience, 10) || 0,
-            }
-          : {
-              role: "user" as const,
-              national_id: nationalId.trim(),
-            };
-
-      const { syncClerkWithBackend } = await import("@/lib/clerkBackendSync");
-
-      let syncResult;
-      try {
-        syncResult = await syncClerkWithBackend(token, payload);
-      } catch (syncErr: any) {
-        console.error("Sync error:", syncErr);
-        Alert.alert(
-          "Sync failed",
-          syncErr?.message ?? "Could not sync account. Please log in.",
-        );
-        router.replace("/login");
-        return;
-      }
-
-      if (!syncResult?.user) {
-        Alert.alert(
-          "Sync failed",
-          "Account created but profile sync failed. Please log in.",
-        );
-        router.replace("/login");
-        return;
-      }
-
-      router.replace(resolvePostAuthRoute(syncResult.user));
-    } catch (e: any) {
-      console.error("VERIFY ERROR:", e);
-      const msg =
-        e?.errors?.[0]?.longMessage || e?.message || "Verification failed";
-      Alert.alert("Verification failed", msg);
     } finally {
       setSubmitting(false);
     }
@@ -316,90 +209,6 @@ export default function RegisterScreen() {
               <Text style={s.footerAction}>Login</Text>
             </TouchableOpacity>
           </View>
-        </ScrollView>
-      </SafeAreaView>
-    );
-  }
-
-  // ── Step 3: OTP verification ────────────────────────────────────────────
-  if (step === 3) {
-    return (
-      <SafeAreaView style={s.container}>
-        <View style={s.header}>
-          <TouchableOpacity onPress={() => setStep(2)}>
-            <Ionicons name="chevron-back" size={24} color="#111827" />
-          </TouchableOpacity>
-          <Text style={s.headerTitle}>Verify Email</Text>
-          <View style={{ width: 24 }} />
-        </View>
-        <ScrollView style={s.scroll}>
-          <View style={s.logoSection}>
-            <View style={s.iconCircle}>
-              <Feather name="mail" size={24} color="#4ADE80" />
-            </View>
-            <Text style={s.mainTitle}>Check your email</Text>
-            <Text
-              style={[
-                s.amharicMainTitle,
-                { fontSize: 13, color: "#6B7280", fontWeight: "400" },
-              ]}
-            >
-              We sent a 6-digit code to {email}
-            </Text>
-          </View>
-
-          <View style={s.formCard}>
-            <View style={s.inputGroup}>
-              <Text style={s.label}>Verification Code</Text>
-              <Text style={s.amharicLabel}>የማረጋገጫ ኮድ</Text>
-              <View style={[s.inputContainer, { justifyContent: "center" }]}>
-                <TextInput
-                  style={[
-                    s.input,
-                    {
-                      textAlign: "center",
-                      fontSize: 24,
-                      letterSpacing: 8,
-                      fontWeight: "700",
-                    },
-                  ]}
-                  placeholder="000000"
-                  placeholderTextColor="#9CA3AF"
-                  keyboardType="number-pad"
-                  maxLength={6}
-                  value={otp}
-                  onChangeText={setOtp}
-                />
-              </View>
-            </View>
-          </View>
-
-          <TouchableOpacity
-            style={s.continueButton}
-            onPress={() => void handleVerifyOtp()}
-            disabled={submitting}
-          >
-            {submitting ? (
-              <ActivityIndicator color="#111827" />
-            ) : (
-              <Text style={s.continueButtonText}>Verify & Continue</Text>
-            )}
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={{ alignItems: "center", marginTop: 16 }}
-            onPress={() =>
-              signUp?.prepareEmailAddressVerification({
-                strategy: "email_code",
-              })
-            }
-          >
-            <Text style={{ color: "#4ADE80", fontSize: 14, fontWeight: "600" }}>
-              Resend code
-            </Text>
-          </TouchableOpacity>
-
-          <View style={{ height: 40 }} />
         </ScrollView>
       </SafeAreaView>
     );

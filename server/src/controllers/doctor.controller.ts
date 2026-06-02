@@ -1,4 +1,3 @@
-import fs from 'fs/promises';
 import type { Request, Response } from 'express';
 import mongoose from 'mongoose';
 
@@ -6,18 +5,6 @@ import doctorService from '../services/doctor.service.js';
 
 function unauthorized(res: Response): void {
   res.status(401).json({ message: 'Unauthorized' });
-}
-
-async function safeUnlinkVideoTemp(filePath: string | undefined): Promise<void> {
-  if (!filePath) return;
-  try {
-    await fs.unlink(filePath);
-  } catch (err) {
-    const code = err && typeof err === 'object' && 'code' in err ? String((err as { code?: string }).code) : '';
-    if (code !== 'ENOENT') {
-      console.warn('doctor.upload: failed to remove temp upload', err);
-    }
-  }
 }
 
 export async function getDashboardStats(req: Request, res: Response): Promise<void> {
@@ -140,40 +127,32 @@ export async function getPatientProfile(req: Request, res: Response): Promise<vo
   }
 }
 
-export async function uploadSupportVideo(req: Request, res: Response): Promise<void> {
-  const videoFile = req.file;
-  if (!req.userId || !req.auth) {
-    unauthorized(res);
-    await safeUnlinkVideoTemp(videoFile?.path);
-    return;
-  }
-
+export async function getCloudinarySignature(req: Request, res: Response): Promise<void> {
+  if (!req.userId || !req.auth) { unauthorized(res); return; }
   try {
-    if (!videoFile) {
-      res.status(400).json({
-        message: 'No video file received by server. Check Multer.',
-      });
-      return;
-    }
+    const signature = await doctorService.generateUploadSignature();
+    res.status(200).json(signature);
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to generate upload signature' });
+  }
+}
 
-    const { title, amharicTitle, tag } = req.body as Record<string, string>;
-
-    const newVideo = await doctorService.uploadVideoData(req.userId, {
-      title: typeof title === 'string' ? title : '',
-      amharicTitle: typeof amharicTitle === 'string' ? amharicTitle : '',
-      tag: typeof tag === 'string' ? tag : '',
-      file: videoFile,
+export async function saveVideoRecord(req: Request, res: Response): Promise<void> {
+  if (!req.userId || !req.auth) { unauthorized(res); return; }
+  try {
+    const { title, amharicTitle, tag, videoUrl, publicId } = req.body as Record<string, string>;
+    if (!videoUrl) { res.status(400).json({ message: 'videoUrl is required' }); return; }
+    const newVideo = await doctorService.saveVideoRecord(req.userId, {
+      title: title ?? '',
+      amharicTitle: amharicTitle ?? '',
+      tag: tag ?? '',
+      videoUrl,
+      publicId,
     });
-
-    res.status(201).json({
-      message: 'Video uploaded successfully',
-      video: newVideo,
-    });
+    res.status(201).json({ message: 'Video saved successfully', video: newVideo });
   } catch (err) {
     console.error('Controller Error:', err);
-    res.status(500).json({
-      message: err instanceof Error ? err.message : 'Failed to upload video',
-    });
+    res.status(500).json({ message: err instanceof Error ? err.message : 'Failed to save video' });
   }
 }
 

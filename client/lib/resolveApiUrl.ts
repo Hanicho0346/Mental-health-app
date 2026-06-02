@@ -63,7 +63,21 @@ function packagerLanHost(): string | null {
  * - iOS simulator: 127.0.0.1 reaches the Mac.
  */
 export function resolveApiBaseUrl(): string {
-  const fromEnv = process.env.EXPO_PUBLIC_API_URL?.trim();
+  const fromEnv =
+    process.env.EXPO_PUBLIC_API_URL?.trim() ||
+    process.env.API_BASE_URL?.trim() ||
+    (typeof Constants.expoConfig?.extra === 'object' && typeof (Constants.expoConfig?.extra as any).EXPO_PUBLIC_API_URL === 'string'
+      ? (Constants.expoConfig?.extra as any).EXPO_PUBLIC_API_URL.trim()
+      : '') ||
+    (typeof Constants.expoConfig?.extra === 'object' && typeof (Constants.expoConfig?.extra as any).API_BASE_URL === 'string'
+      ? (Constants.expoConfig?.extra as any).API_BASE_URL.trim()
+      : '') ||
+    (typeof Constants.manifest?.extra === 'object' && typeof (Constants.manifest?.extra as any).EXPO_PUBLIC_API_URL === 'string'
+      ? (Constants.manifest?.extra as any).EXPO_PUBLIC_API_URL.trim()
+      : '') ||
+    (typeof Constants.manifest?.extra === 'object' && typeof (Constants.manifest?.extra as any).API_BASE_URL === 'string'
+      ? (Constants.manifest?.extra as any).API_BASE_URL.trim()
+      : '');
   const envOrigin = fromEnv ? stripTrailingApiPath(fromEnv) : null;
   const portFromEnv = parsePortFromOptionalUrl(fromEnv) ?? API_PORT;
 
@@ -97,7 +111,7 @@ export function resolveApiBaseUrl(): string {
 
   if (__DEV__) {
     console.warn(
-      '[API] Set EXPO_PUBLIC_API_URL in client/.env if register/login fails (e.g. http://YOUR_LAN_IP:4000). ' +
+      '[API] Set EXPO_PUBLIC_API_URL or API_BASE_URL in client/.env if register/login fails (e.g. http://YOUR_LAN_IP:4000). ' +
         'Use the same machine IP shown by `npx expo start` (LAN). Android emulator uses 10.0.2.2 when host is not usable.'
     );
   }

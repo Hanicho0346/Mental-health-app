@@ -1,44 +1,18 @@
 import axios from "axios";
-import { Platform } from "react-native";
-
 import { resolveApiBaseUrl } from "@/lib/resolveApiUrl";
+import { getStoredAuthToken } from "@/lib/auth";
 
 export type UploadSupportVideoPayload = {
   title: string;
   amharicTitle: string;
   tag: string;
-
-  video: {
-    uri: string;
-    name?: string;
-    type?: string;
-  };
-
-  /** Bearer token — pass Clerk's getToken() result from the calling component */
+  video: { uri: string; name?: string; type?: string };
   token?: string;
-
   onProgress?: (progress: number) => void;
 };
 
-function uploadEndpoint(): string {
-  const origin = resolveApiBaseUrl().replace(/\/+$/, "");
-  return `${origin}/api/doctor/videos/upload`;
-}
-
-function normalizeVideoFile(video: UploadSupportVideoPayload["video"]) {
-  const safeName =
-    video.name && video.name.includes(".")
-      ? video.name
-      : `video-${Date.now()}.mp4`;
-
-  return {
-    uri:
-      Platform.OS === "ios"
-        ? video.uri.replace("file://", "")
-        : video.uri,
-    name: safeName,
-    type: video.type ?? "video/mp4",
-  };
+function apiBase(): string {
+  return resolveApiBaseUrl().replace(/\/+$/, "");
 }
 
 export async function uploadSupportVideo(
@@ -46,61 +20,50 @@ export async function uploadSupportVideo(
 ): Promise<{ message?: string; video?: unknown }> {
   const { title, amharicTitle, tag, video, token, onProgress } = payload;
 
+  const authToken = token ?? (await getStoredAuthToken());
+  const authHeaders = authToken ? { Authorization: `Bearer ${authToken}` } : {};
+
+  // 1. Get a signed upload signature from our server
+  const { data: sig } = await axios.get(`${apiBase()}/api/doctor/videos/sign`, {
+    headers: authHeaders,
+  });
+
+  // 2. Upload directly to Cloudinary
+  const fileName =
+    video.name && video.name.includes(".") ? video.name : `video-${Date.now()}.mp4`;
+
   const formData = new FormData();
-  formData.append("title", title.trim());
-  formData.append("amharicTitle", amharicTitle.trim());
-  formData.append("tag", tag.trim());
-  formData.append("video", normalizeVideoFile(video) as any);
+  formData.append("file", { uri: video.uri, name: fileName, type: video.type ?? "video/mp4" } as any);
+  formData.append("api_key", sig.apiKey);
+  formData.append("timestamp", String(sig.timestamp));
+  formData.append("signature", sig.signature);
+  formData.append("folder", sig.folder);
+  formData.append("eager", "");
 
-  if (__DEV__) {
-    console.log("[UPLOAD] endpoint:", uploadEndpoint());
-    console.log("[UPLOAD] file:", normalizeVideoFile(video));
-    console.log("[UPLOAD] token present:", !!token);
-  }
+  const cloudinaryUrl = `https://api.cloudinary.com/v1_1/${sig.cloudName}/video/upload`;
 
-  try {
-    const response = await axios.post(uploadEndpoint(), formData, {
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "multipart/form-data",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      timeout: 10 * 60 * 1000,
-      maxBodyLength: Infinity,
-      maxContentLength: Infinity,
-      onUploadProgress: (progressEvent) => {
-        if (!progressEvent.total) return;
-        onProgress?.(progressEvent.loaded / progressEvent.total);
-      },
-    });
+  const { data: uploaded } = await axios.post(cloudinaryUrl, formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+    timeout: 10 * 60 * 1000,
+    onUploadProgress: (e) => {
+      if (e.total) onProgress?.(Math.min((e.loaded / e.total) * 0.95, 0.95));
+    },
+  });
 
-    if (__DEV__) {
-      console.log("[UPLOAD] status:", response.status);
-      console.log("[UPLOAD] response:", response.data);
-    }
+  onProgress?.(1);
 
-    onProgress?.(1);
-    return response.data;
-  } catch (error: any) {
-    console.error(
-      "[UPLOAD ERROR FULL]:",
-      error?.response?.data ?? error?.message ?? error,
-    );
+  // 3. Save the Cloudinary URL to our server
+  const { data } = await axios.post(
+    `${apiBase()}/api/doctor/videos/save`,
+    {
+      title,
+      amharicTitle,
+      tag,
+      videoUrl: uploaded.secure_url,
+      publicId: uploaded.public_id,
+    },
+    { headers: { ...authHeaders, "Content-Type": "application/json" } },
+  );
 
-    if (error?.code === "ECONNABORTED") {
-      throw new Error("Upload timed out. Please check your internet connection.");
-    }
-
-    if (error?.message?.includes("Network Error")) {
-      throw new Error(
-        "Cannot connect to server. Check your backend IP and internet connection.",
-      );
-    }
-
-    throw new Error(
-      error?.response?.data?.message ??
-        error?.message ??
-        "Something went wrong during upload.",
-    );
-  }
+  return data;
 }

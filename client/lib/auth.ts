@@ -8,11 +8,13 @@ export const TOKEN_KEY = 'token';
 
 const apiOrigin = resolveApiBaseUrl();
 
-export async function getAuthToken(): Promise<string | null> {
+export async function getStoredAuthToken(): Promise<string | null> {
   const fromStore = useAuthStore.getState().accessToken;
   if (fromStore) return fromStore;
   return AsyncStorage.getItem(TOKEN_KEY);
 }
+
+export const getAuthToken = getStoredAuthToken;
 
 /** @deprecated Prefer `useAuthStore.getState().setSession` after login. */
 export async function setAuthToken(token: string): Promise<void> {

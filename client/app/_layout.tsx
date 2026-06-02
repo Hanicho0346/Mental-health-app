@@ -9,7 +9,7 @@ import { Stack, router, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, View } from "react-native";
+import { ActivityIndicator, Text, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
@@ -27,9 +27,27 @@ import { logClientError } from "@/lib/log";
 
 SplashScreen.preventAutoHideAsync();
 
-const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY!;
-const isExpoGo = Constants.appOwnership === "expo";
-// ───────const isExpoGo = Constants.appOwnership === "expo";──────────────────────────────────────────────────────
+function getClerkPublishableKey(): string | null {
+  const values = [
+    process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY,
+    process.env.CLERK_PUBLISHABLE_KEY,
+    (Constants.expoConfig as any)?.extra?.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY,
+    (Constants.expoConfig as any)?.extra?.CLERK_PUBLISHABLE_KEY,
+    (Constants.manifest as any)?.extra?.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY,
+    (Constants.manifest as any)?.extra?.CLERK_PUBLISHABLE_KEY,
+  ];
+
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+
+  return null;
+}
+
+const publishableKey = getClerkPublishableKey();
+const isExpoGo = Constants.appOwnership === 'expo';
 // Secure token cache for Clerk
 // ─────────────────────────────────────────────────────────────
 
@@ -106,13 +124,8 @@ function RootNavigation() {
   // Clear stale local session
   // ─────────────────────────────────────────────────────────
 
-  useEffect(() => {
-    if (!authHydrated || !isLoaded || isSignedIn || !accessToken) {
-      return;
-    }
-
-    useAuthStore.getState().clearSession();
-  }, [authHydrated, isLoaded, isSignedIn, accessToken]);
+  // NOTE: Backend auth can coexist with Clerk in this app.
+  // Do not clear a valid backend session just because Clerk is not signed in.
 
   // ─────────────────────────────────────────────────────────
   // Auto navigation after login
@@ -138,7 +151,7 @@ function RootNavigation() {
 
     const isRootRoute = segments.length === 0;
 
-    if (isSignedIn && (isAuthRoute || isRootRoute)) {
+    if ((isSignedIn || accessToken) && (isAuthRoute || isRootRoute)) {
       hasNavigated.current = true;
 
       router.replace("/(tabs)");
@@ -290,6 +303,19 @@ useEffect(() => {
 // ─────────────────────────────────────────────────────────────
 
 export default function RootLayout() {
+  if (!publishableKey) {
+    return (
+      <SafeAreaView style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 }}>
+        <Text style={{ fontSize: 18, fontWeight: '700', marginBottom: 12, textAlign: 'center' }}>
+          Clerk is not configured.
+        </Text>
+        <Text style={{ fontSize: 14, color: '#6B7280', textAlign: 'center' }}>
+          Set EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY in your build environment or Expo extra config.
+        </Text>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <ClerkProvider
       publishableKey={publishableKey}

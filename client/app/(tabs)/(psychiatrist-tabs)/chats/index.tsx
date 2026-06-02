@@ -4,6 +4,7 @@ import { useAuth } from "@clerk/clerk-expo";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
+import { getStoredAuthToken } from "@/lib/auth";
 import {
   ActivityIndicator,
   FlatList,
@@ -44,7 +45,9 @@ export default function PsychiatristChatsLobby() {
   // FIX-A: pass backend JWT so the server resolves the MongoDB _id correctly
   useEffect(() => {
     const load = async () => {
-      const token = await getToken({ template: "backend" });
+      const token =
+        (await getStoredAuthToken()) ??
+        (await getToken({ template: "backend" }));
       if (token) await loadConversations(token);
     };
     load();
@@ -93,7 +96,9 @@ export default function PsychiatristChatsLobby() {
   // FIX-C: backend template on refresh too (was already correct, kept explicit)
   const onRefresh = async () => {
     setRefreshing(true);
-    const token = await getToken({ template: "backend" });
+    const token =
+      (await getStoredAuthToken()) ??
+      (await getToken({ template: "backend" }));
     if (token && loadConversations) await loadConversations(token);
     setRefreshing(false);
   };

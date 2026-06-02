@@ -57,7 +57,7 @@ export default function TabsGroupLayout() {
   const isLoading = !authHydrated || !isLoaded || (isSignedIn && !accessToken && syncState === 'syncing');
 
   if (isLoading) return <LoadingScreen />;
-  if (!isSignedIn || isInvalidSessionError) return <Redirect href="/login" />;
+  if (!accessToken || isInvalidSessionError) return <Redirect href="/login" />;
   if (syncState === 'error') {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 }}>

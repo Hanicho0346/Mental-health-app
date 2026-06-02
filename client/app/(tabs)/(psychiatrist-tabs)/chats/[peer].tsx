@@ -52,6 +52,7 @@ import { useChatStore } from "@/stores/chatStore";
 import { useAuth } from "@clerk/clerk-expo";
 import axios from "axios";
 import { API_URL } from "@/lib/api";
+import { getStoredAuthToken } from "@/lib/auth";
 
 type Message = {
   id: string;
@@ -113,7 +114,9 @@ export default function PsychiatristDirectChatScreen() {
 
     const fetchPeerName = async () => {
       try {
-        const token = await getTokenRef.current({ template: "backend" });
+        const token =
+          (await getStoredAuthToken()) ??
+          (await getTokenRef.current({ template: "backend" }));
         if (!token) return;
         const { data } = await axios.get(`${API_URL}/api/users/${peerId}`, {
           headers: { Authorization: `Bearer ${token}` },
@@ -139,7 +142,9 @@ export default function PsychiatristDirectChatScreen() {
     }
     try {
       setLoading(true);
-      const token = await getTokenRef.current({ template: "backend" });
+      const token =
+        (await getStoredAuthToken()) ??
+        (await getTokenRef.current({ template: "backend" }));
       if (!token) {
         setLoading(false);
         return;
@@ -194,7 +199,9 @@ export default function PsychiatristDirectChatScreen() {
     setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
 
     try {
-      const token = await getToken({ template: "backend" });
+      const token =
+        (await getStoredAuthToken()) ??
+        (await getToken({ template: "backend" }));
       if (!token) throw new Error("No auth token");
 
       const { data } = await axios.post(

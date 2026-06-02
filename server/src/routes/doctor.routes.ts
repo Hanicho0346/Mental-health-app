@@ -1,6 +1,4 @@
 import express from 'express';
-import fs from 'fs';
-import multer from 'multer';
 
 import {
   getAppointmentsByDate,
@@ -9,7 +7,8 @@ import {
   getPatients,
   getTodayAppointments,
   getUrgentAlerts,
-  uploadSupportVideo,
+  getCloudinarySignature,
+  saveVideoRecord,
   getSupportVideos,
   incrementVideoListen,
   toggleVideoFavorite,
@@ -21,15 +20,6 @@ const router = express.Router();
 
 const doctorGate = [requireAuth, requirePsychiatristAccess];
 
-if (!fs.existsSync('uploads/')) {
-  fs.mkdirSync('uploads/', { recursive: true });
-}
-
-const upload = multer({
-  dest: 'uploads/',
-  limits: { fileSize: 100 * 1024 * 1024 },
-});
-
 router.get('/dashboard/stats', ...doctorGate, getDashboardStats);
 router.get('/dashboard/alerts', ...doctorGate, getUrgentAlerts);
 router.get('/appointments/today', ...doctorGate, getTodayAppointments);
@@ -40,7 +30,8 @@ router.get('/patients/:patientId', ...doctorGate, getPatientProfile);
 router.get('/patients', ...doctorGate, getPatients);
 router.post('/videos/:id/listen', requireAuth, incrementVideoListen);
 router.post('/videos/:id/toggle-favorite', requireAuth, toggleVideoFavorite);
-router.post('/videos/upload', ...doctorGate, upload.single('video'), uploadSupportVideo);
+router.get('/videos/sign', ...doctorGate, getCloudinarySignature);
+router.post('/videos/save', ...doctorGate, saveVideoRecord);
 router.get('/videos', requireAuth, getSupportVideos);
 
 export default router;

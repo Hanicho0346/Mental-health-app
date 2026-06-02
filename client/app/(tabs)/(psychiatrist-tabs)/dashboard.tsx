@@ -20,6 +20,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { uploadSupportVideo } from "@/lib/uploadSupportVideo";
+import { getStoredAuthToken } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { getSocket } from "@/lib/socket";
 
@@ -78,6 +79,8 @@ export default function DashboardScreen() {
   const { getToken } = useAuth();
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadPhase, setUploadPhase] = useState<"uploading" | "saving">("uploading");
   const [selectedVideo, setSelectedVideo] =
     useState<ImagePicker.ImagePickerAsset | null>(null);
   const [videoForm, setVideoForm] = useState({
@@ -127,7 +130,8 @@ export default function DashboardScreen() {
     if (!socket) return;
 
     const handleNotificationUpdate = () => {
-      api.get("/notifications/unread-count")
+      api
+        .get("/notifications/unread-count")
         .then((res) => {
           setUnreadNotificationCount(res.data?.unread_count ?? 0);
         })
@@ -188,7 +192,8 @@ export default function DashboardScreen() {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Videos,
       allowsEditing: true,
-      quality: 1,
+      quality: 0.5,
+      videoMaxDuration: 300,
     });
 
     if (!result.canceled && result.assets.length > 0) {
@@ -197,7 +202,11 @@ export default function DashboardScreen() {
   };
 
   const handleUploadVideo = async () => {
-    const token = await getToken({ template: "backend" }) ?? await getToken() ?? undefined;
+    const token =
+      (await getStoredAuthToken()) ??
+      (await getToken({ template: "backend" })) ??
+      (await getToken()) ??
+      undefined;
     if (!selectedVideo) {
       Alert.alert("Please select a video");
       return;
@@ -210,20 +219,18 @@ export default function DashboardScreen() {
 
       const type = selectedVideo.mimeType || "video/mp4";
 
+      setUploadProgress(0);
+      setUploadPhase("uploading");
+
       await uploadSupportVideo({
         title: videoForm.title,
         amharicTitle: videoForm.amharicTitle,
         tag: videoForm.tag,
         token,
-
-        video: {
-          uri: selectedVideo.uri,
-          name: filename,
-          type,
-        },
-
-        onProgress(progress) {
-          console.log("Upload:", Math.round(progress * 100), "%");
+        video: { uri: selectedVideo.uri, name: filename, type },
+        onProgress: (p) => {
+          setUploadProgress(p);
+          if (p >= 1) setUploadPhase("saving");
         },
       });
 
@@ -257,9 +264,10 @@ export default function DashboardScreen() {
       }
 
       Alert.alert("Upload failed", detail);
-      
     } finally {
       setIsUploading(false);
+      setUploadProgress(0);
+      setUploadPhase("uploading");
     }
   };
 
@@ -549,8 +557,28 @@ export default function DashboardScreen() {
               />
             </View>
 
+            {isUploading && (
+              <View style={styles.uploadStatusBox}>
+                {uploadPhase === "uploading" ? (
+                  <>
+                    <View style={styles.progressBarTrack}>
+                      <View style={[styles.progressBarFill, { width: `${Math.round(uploadProgress * 100)}%` as any }]} />
+                    </View>
+                    <Text style={styles.uploadStatusText}>
+                      Uploading… {Math.round(uploadProgress * 100)}%
+                    </Text>
+                  </>
+                ) : (
+                  <>
+                    <ActivityIndicator size="small" color="#4ADE80" />
+                    <Text style={styles.uploadStatusText}>Saving video…</Text>
+                  </>
+                )}
+              </View>
+            )}
+
             <TouchableOpacity
-              style={[styles.uploadSubmitBtn, isUploading && { opacity: 0.7 }]}
+              style={[styles.uploadSubmitBtn, isUploading && { opacity: 0.5 }]}
               onPress={handleUploadVideo}
               disabled={isUploading}
             >
@@ -800,5 +828,33 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     padding: 20,
+  },
+  uploadStatusBox: {
+    backgroundColor: "#F0FDF4",
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 12,
+    gap: 8,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#BBF7D0",
+  },
+  progressBarTrack: {
+    width: "100%",
+    height: 6,
+    backgroundColor: "#D1FAE5",
+    borderRadius: 4,
+    overflow: "hidden",
+  },
+  progressBarFill: {
+    height: 6,
+    backgroundColor: "#4ADE80",
+    borderRadius: 4,
+  },
+  uploadStatusText: {
+    fontSize: 13,
+    color: "#065F46",
+    fontWeight: "500",
+    textAlign: "center",
   },
 });

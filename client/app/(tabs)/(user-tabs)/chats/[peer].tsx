@@ -19,6 +19,7 @@ import axios from "axios";
 import { getSocket } from "@/lib/socket";
 import { useChatStore } from "@/stores/chatStore";
 import { API_URL } from "@/lib/api";
+import { getStoredAuthToken } from "@/lib/auth";
 
 type Message = {
   id: string;
@@ -54,6 +55,14 @@ export default function UserDirectChatScreen() {
     if (cachedToken.current && now < tokenExpiry.current - 5 * 60 * 1000) {
       return cachedToken.current;
     }
+
+    const storedToken = await getStoredAuthToken();
+    if (storedToken) {
+      cachedToken.current = storedToken;
+      tokenExpiry.current = now + 60 * 60 * 1000;
+      return storedToken;
+    }
+
     try {
       const token = await getToken({ template: "backend" });
       if (token) {
