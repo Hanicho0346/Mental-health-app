@@ -11,12 +11,18 @@ function getTransporter(): nodemailer.Transporter | null {
     return null;
   }
   if (!transporter) {
-    transporter = nodemailer.createTransport({
-      host,
-      port: port ?? 587,
-      secure: env.smtp.secure,
-      auth: { user, pass: pass.trim() },
-    });
+   transporter = nodemailer.createTransport({
+  host,
+  port: 465,
+  secure: true,
+  auth: {
+    user,
+    pass: pass.trim(),
+  },
+  tls: {
+    family: 4,
+  },
+});
   }
   return transporter;
 }
