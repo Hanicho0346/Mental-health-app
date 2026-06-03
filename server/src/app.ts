@@ -39,6 +39,7 @@ export function createApp() {
   );
   app.use(express.json({ limit: '512kb' }));
   app.use(mongoSanitizeMiddleware());
+  app.set('trust proxy', 1);
   app.use(globalRateLimiter());
   app.use(requestLogger);
 
