@@ -25,3 +25,5 @@ npm start
 mentalhealth
 
 7. Update the .env file with your MongoDB connection string for the temporary mental-health database before starting the server.
+<img width="610" height="1172" alt="Image" src="https://github.com/user-attachments/assets/f96dac52-5f95-4e87-b86c-9c2224e0063c" />
+<img width="622" height="1135" alt="Image" src="https://github.com/user-attachments/assets/01164f6f-5b9d-4262-b102-4244b61ba634" />
