@@ -59,10 +59,8 @@
     },
     "extra": {
       "router": {},
-      "eas": {
-        "projectId": "a1d849c2-f0a8-4b5e-9459-b5869784ef5d"
-      }
+      "eas": {}
     },
-    "owner": "tesfa-mind"
+    "owner": "hanicho5"
   }
 }
