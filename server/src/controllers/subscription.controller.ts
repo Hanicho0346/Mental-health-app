@@ -1,13 +1,13 @@
-import crypto from 'crypto';
 import type { RequestHandler } from 'express';
 import {
   initiatePremierSubscription,
   verifyPremierSubscription,
 } from '../services/subscription.service.js';
 import { User } from '../models/User.js';
+import { verifyChapaWebhookSignature } from '../utils/chapaWebhook.js';
 
-const BASE_URL = process.env.API_BASE_URL;
-const RETURN_URL = process.env.CHAPA_RETURN_URL ?? `${BASE_URL}/payment-return`;
+const BASE_URL = process.env.API_BASE_URL || process.env.CLIENT_URL || 'http://localhost:5000';
+const RETURN_URL = process.env.CHAPA_RETURN_URL || `${BASE_URL}/payment-return`;
 const WEBHOOK_SECRET = process.env.CHAPA_WEBHOOK_SECRET ?? '';
 
 export const initiatePremierHandler: RequestHandler = async (req, res, next) => {
@@ -33,7 +33,6 @@ export const initiatePremierHandler: RequestHandler = async (req, res, next) => 
       callbackUrl: `${BASE_URL}/api/subscriptions/chapa/callback`,
       returnUrl: RETURN_URL,
     });
-   console.log("Initiate Premier Subscription Result:", result);
     res.json(result);
   } catch (err) {
     next(err);
@@ -61,18 +60,8 @@ export const verifyPremierHandler: RequestHandler = async (req, res, next) => {
 export const chapaSubscriptionCallbackHandler: RequestHandler = async (req, res, next) => {
   try {
     // 1. Verify Chapa's webhook signature
-    const sig = req.headers['x-chapa-signature'] as string | undefined;
-
-    if (WEBHOOK_SECRET) {
-      const expected = crypto
-        .createHmac('sha256', WEBHOOK_SECRET)
-        .update(JSON.stringify(req.body))
-        .digest('hex');
-
-      if (!sig || sig !== expected) {
-        res.status(400).json({ error: 'Invalid signature' });
-        return;
-      }
+    if (!verifyChapaWebhookSignature(req, res, WEBHOOK_SECRET)) {
+      return;
     }
 
     // 2. Chapa sends trx_ref (note the spelling)

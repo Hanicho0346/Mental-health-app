@@ -6,6 +6,7 @@ const User_js_1 = require("../../models/User.js");
 const PsychiatristProfile_js_1 = require("../../models/PsychiatristProfile.js");
 const psychiatrist_service_js_1 = require("../psychiatrist/psychiatrist.service.js");
 const booking_service_js_1 = require("../../controllers/booking.service.js");
+const notification_service_js_1 = require("../../services/notification.service.js");
 const reviewSchema = zod_1.z.object({
     feedback: zod_1.z.string().max(1000).optional(),
 });
@@ -26,8 +27,18 @@ const approvePsychiatrist = async (req, res, next) => {
             res.status(401).json({ error: 'Unauthorized' });
             return;
         }
+        const psychiatristId = req.params.id;
         const { feedback } = reviewSchema.parse(req.body);
-        const result = await (0, psychiatrist_service_js_1.reviewPsychiatrist)(req.userId, req.params.id, 'approved', feedback);
+        const psychiatrist = await User_js_1.User.findById(psychiatristId).select('full_name').lean();
+        if (!psychiatrist) {
+            res.status(404).json({ error: 'Psychiatrist not found' });
+            return;
+        }
+        const result = await (0, psychiatrist_service_js_1.reviewPsychiatrist)(req.userId, psychiatristId, 'approved', feedback);
+        void (0, notification_service_js_1.notifyPsychiatristApproved)({
+            psychiatristId,
+            psychiatristName: psychiatrist.full_name,
+        });
         res.json(result);
     }
     catch (err) {
@@ -41,12 +52,23 @@ const rejectPsychiatrist = async (req, res, next) => {
             res.status(401).json({ error: 'Unauthorized' });
             return;
         }
+        const psychiatristId = req.params.id;
         const { feedback } = reviewSchema.parse(req.body);
         if (!feedback?.trim()) {
             res.status(400).json({ error: 'Feedback is required when rejecting' });
             return;
         }
-        const result = await (0, psychiatrist_service_js_1.reviewPsychiatrist)(req.userId, req.params.id, 'rejected', feedback);
+        const psychiatrist = await User_js_1.User.findById(psychiatristId).select('full_name').lean();
+        if (!psychiatrist) {
+            res.status(404).json({ error: 'Psychiatrist not found' });
+            return;
+        }
+        const result = await (0, psychiatrist_service_js_1.reviewPsychiatrist)(req.userId, psychiatristId, 'rejected', feedback);
+        void (0, notification_service_js_1.notifyPsychiatristRejected)({
+            psychiatristId,
+            psychiatristName: psychiatrist.full_name,
+            reason: feedback.trim(),
+        });
         res.json(result);
     }
     catch (err) {

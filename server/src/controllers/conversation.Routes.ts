@@ -5,7 +5,7 @@ import {
   getConversationMessages,
 } from "../controllers/conversationController.js";
 
-import { requireAuth } from "../middleware/authenticate";
+import { requireAuth } from "../middleware/authenticate.js";
 
 const router = express.Router();
 

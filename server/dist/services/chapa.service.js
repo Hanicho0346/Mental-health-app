@@ -9,6 +9,9 @@ const axios_1 = __importDefault(require("axios"));
 const AppError_js_1 = require("../utils/AppError.js");
 const CHAPA_BASE = 'https://api.chapa.co/v1';
 const CHAPA_SECRET = process.env.CHAPA_SECRET_KEY ?? '';
+function useDevPaymentMock() {
+    return !CHAPA_SECRET && process.env.NODE_ENV !== 'production';
+}
 function extractChapaMessage(err) {
     const data = err?.response?.data;
     if (!data)
@@ -29,8 +32,18 @@ function extractChapaMessage(err) {
     return err?.message ?? 'Chapa service error';
 }
 async function initiateChapaPayment(params) {
-    if (!CHAPA_SECRET)
-        throw new AppError_js_1.AppError(503, 'Payment service not configured');
+    if (useDevPaymentMock()) {
+        // Build return URL manually to support both http:// and deep-link schemes
+        // (e.g. mental-health-mobile://) — node's URL constructor only accepts http/https
+        const base = params.return_url;
+        const sep = base.includes('?') ? '&' : '?';
+        const mockUrl = `${base}${sep}tx_ref=${encodeURIComponent(params.tx_ref)}&trx_ref=${encodeURIComponent(params.tx_ref)}&status=success`;
+        console.warn('[Chapa] DEV mock checkout (CHAPA_SECRET_KEY unset). Set a real key for live payments.');
+        return { checkout_url: mockUrl };
+    }
+    if (!CHAPA_SECRET) {
+        throw new AppError_js_1.AppError(503, 'Payment service not configured. Set CHAPA_SECRET_KEY in the server environment.');
+    }
     try {
         const { data } = await axios_1.default.post(`${CHAPA_BASE}/transaction/initialize`, {
             ...params,
@@ -55,8 +68,13 @@ async function initiateChapaPayment(params) {
     }
 }
 async function verifyChapaPayment(tx_ref) {
-    if (!CHAPA_SECRET)
-        throw new AppError_js_1.AppError(503, 'Payment service not configured');
+    if (useDevPaymentMock()) {
+        console.warn('[Chapa] DEV mock verify for', tx_ref);
+        return { success: true, status: 'success', amount: 0 };
+    }
+    if (!CHAPA_SECRET) {
+        throw new AppError_js_1.AppError(503, 'Payment service not configured. Set CHAPA_SECRET_KEY in the server environment.');
+    }
     try {
         const { data } = await axios_1.default.get(`${CHAPA_BASE}/transaction/verify/${tx_ref}`, { headers: { Authorization: `Bearer ${CHAPA_SECRET}` } });
         return {

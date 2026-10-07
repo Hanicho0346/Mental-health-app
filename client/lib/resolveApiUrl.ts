@@ -1,7 +1,7 @@
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 
-const API_PORT = 4000;
+const API_PORT = 5000;
 
 function stripTrailingSlash(url: string): string {
   return url.replace(/\/+$/, '');
@@ -72,11 +72,11 @@ export function resolveApiBaseUrl(): string {
     (typeof Constants.expoConfig?.extra === 'object' && typeof (Constants.expoConfig?.extra as any).API_BASE_URL === 'string'
       ? (Constants.expoConfig?.extra as any).API_BASE_URL.trim()
       : '') ||
-    (typeof Constants.manifest?.extra === 'object' && typeof (Constants.manifest?.extra as any).EXPO_PUBLIC_API_URL === 'string'
-      ? (Constants.manifest?.extra as any).EXPO_PUBLIC_API_URL.trim()
+    (typeof (Constants.manifest as any)?.extra === 'object' && typeof (Constants.manifest as any)?.extra?.EXPO_PUBLIC_API_URL === 'string'
+      ? (Constants.manifest as any).extra.EXPO_PUBLIC_API_URL.trim()
       : '') ||
-    (typeof Constants.manifest?.extra === 'object' && typeof (Constants.manifest?.extra as any).API_BASE_URL === 'string'
-      ? (Constants.manifest?.extra as any).API_BASE_URL.trim()
+    (typeof (Constants.manifest as any)?.extra === 'object' && typeof (Constants.manifest as any)?.extra?.API_BASE_URL === 'string'
+      ? (Constants.manifest as any).extra.API_BASE_URL.trim()
       : '');
   const envOrigin = fromEnv ? stripTrailingApiPath(fromEnv) : null;
   const portFromEnv = parsePortFromOptionalUrl(fromEnv) ?? API_PORT;

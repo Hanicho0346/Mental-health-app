@@ -14,6 +14,7 @@ exports.logoutRefresh = logoutRefresh;
 exports.verifyEmailCode = verifyEmailCode;
 exports.resendVerificationEmail = resendVerificationEmail;
 exports.forgotPasswordRequest = forgotPasswordRequest;
+exports.uploadDocument = uploadDocument;
 exports.resetPasswordWithCode = resetPasswordWithCode;
 exports.logAuthError = logAuthError;
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
@@ -29,6 +30,7 @@ const AppError_js_1 = require("../../utils/AppError.js");
 const otp_js_1 = require("../../utils/otp.js");
 const tokenHash_js_1 = require("../../utils/tokenHash.js");
 const logger_js_1 = require("../../utils/logger.js");
+const cloudinary_service_js_1 = require("../../services/cloudinary.service.js");
 const SALT_ROUNDS = 12;
 function pickRole(r) {
     if (r === 'psychiatrist' || r === 'admin')
@@ -44,6 +46,9 @@ function clientIp(req) {
 function publicUser(user) {
     const role = pickRole(user.role);
     const verification_status = user.verification_status ?? null;
+    const rawExpiry = user.premier_expires_at ?? null;
+    const isExpired = rawExpiry !== null && new Date(rawExpiry) < new Date();
+    const isPremier = (user.is_premier === true) && !isExpired;
     return {
         id: user._id.toString(),
         full_name: user.full_name,
@@ -60,6 +65,8 @@ function publicUser(user) {
             (role === 'psychiatrist' ? verification_status === 'approved' : true),
         admin_feedback: user.admin_feedback ?? '',
         hospital_or_clinic: user.hospital_or_clinic ?? '',
+        is_premier: isPremier,
+        subscription_tier: user.subscription_tier ?? 'free',
     };
 }
 async function issueAuthResponse(userId, req) {
@@ -125,7 +132,8 @@ async function issueEmailVerificationOtp(userId, registeredEmail) {
     const hash = (0, otp_js_1.hashOtp)(env_js_1.env.otpPepper, code);
     const exp = new Date(Date.now() + 15 * 60_000);
     await User_js_1.User.updateOne({ _id: userId }, { $set: { email_verification_otp_hash: hash, email_verification_otp_expires_at: exp } });
-    await (0, email_service_js_1.sendVerificationCodeToRegisteredEmail)(registeredEmail, code);
+    (0, logger_js_1.logServerInfo)('auth: verification OTP generated', { userId: userId.toString() });
+    await (0, email_service_js_1.sendVerificationCodeToRegisteredEmail)(userId.toString(), registeredEmail, code);
 }
 async function registerWithPassword(input, req) {
     const hashed = await bcryptjs_1.default.hash(input.password, SALT_ROUNDS);
@@ -179,6 +187,18 @@ async function registerWithPassword(input, req) {
                 medical_license: input.medical_license?.trim(),
                 specialization: input.specialization?.trim(),
                 experience_years: input.experience_years,
+                hospital_or_clinic: input.hospital_or_clinic?.trim() || '',
+                // ── Store uploaded certificate in uploaded_documents ──
+                uploaded_documents: input.certificate_url
+                    ? [
+                        {
+                            url: input.certificate_url,
+                            public_id: '',
+                            kind: 'psychiatrist_doc',
+                            uploaded_at: new Date(),
+                        },
+                    ]
+                    : [],
             }
             : input.national_id?.trim()
                 ? { national_id: input.national_id.trim() }
@@ -204,9 +224,16 @@ async function loginWithPassword(input, req) {
     if (!user?.password || !(await bcryptjs_1.default.compare(input.password, user.password))) {
         throw new AppError_js_1.AppError(401, 'Invalid email or password');
     }
+    if (user.account_status === 'suspended') {
+        throw new AppError_js_1.AppError(403, 'Your account has been suspended. Please contact support.');
+    }
+    if (user.account_status === 'deleted') {
+        throw new AppError_js_1.AppError(403, 'This account has been deleted.');
+    }
     if ((env_js_1.env.emailVerificationEnabled || env_js_1.env.blockUnverifiedLogin) && !user.email_verified) {
         throw new AppError_js_1.AppError(403, 'Email not verified');
     }
+    await User_js_1.User.updateOne({ _id: user._id }, { $set: { last_login_at: new Date() } });
     return issueAuthResponse(user._id.toString(), req);
 }
 async function refreshTokens(refreshToken, req) {
@@ -263,12 +290,31 @@ async function forgotPasswordRequest(input) {
     const hash = (0, otp_js_1.hashOtp)(env_js_1.env.otpPepper, code);
     const exp = new Date(Date.now() + 60 * 60_000);
     await User_js_1.User.updateOne({ _id: user._id }, { $set: { password_reset_otp_hash: hash, password_reset_otp_expires_at: exp } });
-    await (0, email_service_js_1.sendMail)({
-        to: user.email,
-        subject: 'Password reset',
-        text: `Your password reset code is: ${code}. It expires in one hour.`,
-    });
+    await (0, email_service_js_1.queuePasswordResetEmail)(user._id.toString(), user.email, code);
     return { ok: true };
+}
+async function uploadDocument(input) {
+    const publicId = input.userId
+        ? `cert_${input.userId}`
+        : `cert_pending_${(0, node_crypto_1.randomBytes)(16).toString('hex')}`;
+    const { url, public_id } = await (0, cloudinary_service_js_1.uploadBuffer)(input.fileBuffer, 'psychiatrist_certificates', {
+        publicId,
+        resourceType: input.mimeType === 'application/pdf' ? 'raw' : 'image',
+    });
+    if (input.userId) {
+        await User_js_1.User.updateOne({ _id: input.userId }, { $pull: { uploaded_documents: { kind: 'psychiatrist_doc' } } });
+        await User_js_1.User.updateOne({ _id: input.userId }, {
+            $push: {
+                uploaded_documents: {
+                    url,
+                    public_id,
+                    kind: 'psychiatrist_doc',
+                    uploaded_at: new Date(),
+                },
+            },
+        });
+    }
+    return { ok: true, url };
 }
 async function resetPasswordWithCode(input) {
     const user = await User_js_1.User.findOne({ email: input.email.trim().toLowerCase() })

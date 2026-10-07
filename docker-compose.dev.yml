@@ -1,0 +1,25 @@
+# Development overrides — from repo root:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+
+services:
+  api:
+    environment:
+      NODE_ENV: development
+      EMAIL_VERIFICATION_ENABLED: "false"
+      BLOCK_UNVERIFIED_LOGIN: "false"
+    ports:
+      - "5000:5000"
+
+  worker:
+    environment:
+      NODE_ENV: development
+      EMAIL_VERIFICATION_ENABLED: "false"
+      BLOCK_UNVERIFIED_LOGIN: "false"
+
+  mongodb:
+    ports:
+      - "27017:27017"
+
+  redis:
+    ports:
+      - "6379:6379"

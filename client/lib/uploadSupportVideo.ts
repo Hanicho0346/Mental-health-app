@@ -9,52 +9,61 @@ export type UploadSupportVideoPayload = {
   onProgress?: (progress: number) => void;
 };
 
-function apiBase(): string {
-  return resolveApiBaseUrl().replace(/\/+$/, "");
-}
-
 export async function uploadSupportVideo(
   payload: UploadSupportVideoPayload,
 ): Promise<{ message?: string; video?: unknown }> {
   const { title, amharicTitle, tag, video, onProgress } = payload;
 
-  // 1. Get a signed upload signature — use `api` so token refresh works automatically
+  // 1. Get a signed upload signature
   const { data: sig } = await api.get("/doctor/videos/sign");
 
-  // 2. Upload directly to Cloudinary using plain axios (no auth needed, goes to Cloudinary not our server)
-  const fileName =
-    video.name && video.name.includes(".") ? video.name : `video-${Date.now()}.mp4`;
-
-  // 2. Upload directly to Cloudinary using fetch (most compatible with React Native)
   const cloudinaryUrl = `https://api.cloudinary.com/v1_1/${sig.cloudName}/video/upload`;
 
-  const formData = new FormData();
-  formData.append("file", { uri: video.uri, name: fileName, type: video.type ?? "video/mp4" } as any);
-  formData.append("api_key", sig.apiKey);
-  formData.append("timestamp", String(sig.timestamp));
-  formData.append("signature", sig.signature);
-  formData.append("folder", sig.folder);
-
-  const response = await fetch(cloudinaryUrl, {
-    method: "POST",
-    body: formData,
+  // 2. Fetch the local file as a Blob, then upload via XHR — works in both Expo Go and native builds
+  const fileBlob: Blob = await new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("GET", video.uri);
+    xhr.responseType = "blob";
+    xhr.onload = () => resolve(xhr.response as Blob);
+    xhr.onerror = () => reject(new Error("Failed to read local video file"));
+    xhr.send();
   });
 
-  if (!response.ok) {
-    const errText = await response.text().catch(() => response.status.toString());
-    throw new Error(`Cloudinary ${response.status}: ${errText}`);
-  }
+  const formData = new FormData();
+  formData.append("file", fileBlob, video.name ?? `video-${Date.now()}.mp4`);
+  formData.append("api_key", String(sig.apiKey));
+  formData.append("timestamp", String(sig.timestamp));
+  formData.append("signature", String(sig.signature));
+  formData.append("folder", String(sig.folder));
 
-  const uploaded = await response.json() as { secure_url: string; public_id: string };
+  const uploadedData = await new Promise<{ secure_url: string; public_id: string }>(
+    (resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", cloudinaryUrl);
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try { resolve(JSON.parse(xhr.responseText)); }
+          catch { reject(new Error("Cloudinary response parse error")); }
+        } else {
+          reject(new Error(`Cloudinary ${xhr.status}: ${xhr.responseText}`));
+        }
+      };
+      xhr.onerror = () => reject(new Error("Network error during Cloudinary upload"));
+      xhr.timeout = 120_000;
+      xhr.ontimeout = () => reject(new Error("Cloudinary upload timed out"));
+      xhr.send(formData);
+    }
+  );
+
   onProgress?.(1);
 
-  // 3. Save the Cloudinary URL — use `api` so token refresh works automatically
+  // 3. Save the Cloudinary URL to our server
   const { data } = await api.post("/doctor/videos/save", {
     title,
     amharicTitle,
     tag,
-    videoUrl: uploaded.secure_url,
-    publicId: uploaded.public_id,
+    videoUrl: uploadedData.secure_url,
+    publicId: uploadedData.public_id,
   });
 
   return data;

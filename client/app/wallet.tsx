@@ -1,3 +1,4 @@
+import { shadowStyle } from "@/lib/shadow";
 import { api } from '@/lib/api';
 import { getApiErrorMessage, logClientError } from '@/lib/log';
 import { Feather } from '@expo/vector-icons';
@@ -165,7 +166,7 @@ const s = StyleSheet.create({
   balanceCard: {
     margin: 16, borderRadius: 24, padding: 28,
     backgroundColor: '#16A34A',
-    shadowColor: '#16A34A', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.3, shadowRadius: 12, elevation: 8,
+    ...shadowStyle({ color: '#16A34A', offset: { width: 0, height: 6 }, opacity: 0.3, radius: 12, elevation: 8 }),
   },
   balanceLabel: { fontSize: 14, color: 'rgba(255,255,255,0.8)', marginBottom: 8 },
   balanceAmount: { fontSize: 38, fontWeight: '800', color: '#FFFFFF', marginBottom: 12 },
@@ -180,7 +181,7 @@ const s = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 12,
     backgroundColor: '#FFFFFF', marginHorizontal: 16, marginBottom: 10,
     borderRadius: 16, padding: 14,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 4, elevation: 1,
+    ...shadowStyle({ color: '#000', offset: { width: 0, height: 1 }, opacity: 0.04, radius: 4, elevation: 1 }),
   },
   txIcon: { width: 44, height: 44, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
   txInfo: { flex: 1 },

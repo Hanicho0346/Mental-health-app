@@ -14,12 +14,10 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
-import { useAuth } from "@clerk/clerk-expo";
-import axios from "axios";
+import { api } from "@/lib/api";
 import { getSocket } from "@/lib/socket";
 import { useChatStore } from "@/stores/chatStore";
-import { API_URL } from "@/lib/api";
-import { getStoredAuthToken } from "@/lib/auth";
+import VideoCallModal, { type CallState } from "@/components/VideoCallModal";
 
 type Message = {
   id: string;
@@ -32,7 +30,6 @@ type Message = {
 
 export default function UserDirectChatScreen() {
   const { peer: peerId } = useLocalSearchParams<{ peer: string }>();
-  const { getToken } = useAuth();
   const me = useChatStore((s) => s.me);
   const currentUserId = me?.userId;
 
@@ -42,59 +39,56 @@ export default function UserDirectChatScreen() {
   const [sending, setSending] = useState(false);
   const [peerName, setPeerName] = useState<string>("");
 
+  const [callState, setCallState] = useState<CallState>("idle");
+  const [incomingCaller, setIncomingCaller] = useState<string | null>(null);
+  const [callRoomId, setCallRoomId] = useState<string | null>(null);
+
   const flatListRef = useRef<FlatList>(null);
   const tempIds = useRef<Set<string>>(new Set());
-
-  // ── Cache the token so we don't call getToken on every request ──────────
-  const cachedToken = useRef<string | null>(null);
-  const tokenExpiry = useRef<number>(0);
+  const callTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const callStartRef = useRef<number>(0);
+  // Ref mirrors callState to avoid stale closures in socket handlers
+  const callStateRef = useRef<CallState>("idle");
 
   const getAuthToken = useCallback(async (): Promise<string | null> => {
-    const now = Date.now();
-    // Reuse cached token if still valid (5 min buffer)
-    if (cachedToken.current && now < tokenExpiry.current - 5 * 60 * 1000) {
-      return cachedToken.current;
-    }
+    const { useAuthStore } = await import("@/stores/authStore");
+    return useAuthStore.getState().accessToken;
+  }, []);
 
-    const storedToken = await getStoredAuthToken();
-    if (storedToken) {
-      cachedToken.current = storedToken;
-      tokenExpiry.current = now + 60 * 60 * 1000;
-      return storedToken;
-    }
-
-    try {
-      const token = await getToken({ template: "backend" });
-      if (token) {
-        cachedToken.current = token;
-        // Clerk tokens typically last 60 min
-        tokenExpiry.current = now + 60 * 60 * 1000;
-      }
-      return token;
-    } catch {
-      return null;
-    }
-  }, [getToken]);
-
-  // ── Guard against concurrent fetches ────────────────────────────────────
   const historyFetching = useRef(false);
   const peerFetching = useRef(false);
 
-  // ── Load history ─────────────────────────────────────────────────────────
+  useEffect(() => {
+    callStateRef.current = callState;
+  }, [callState]);
+
+  useEffect(() => {
+    if (!peerId || peerFetching.current) return;
+    peerFetching.current = true;
+
+    const fetchPeerName = async () => {
+      try {
+        const { data } = await api.get(`/users/peer/${peerId}`, { timeout: 5_000 });
+        if (data?.full_name) setPeerName(data.full_name);
+      } catch {
+        // silently fail
+      } finally {
+        peerFetching.current = false;
+      }
+    };
+
+    void fetchPeerName();
+  }, [peerId, getAuthToken]);
+
   const loadHistory = useCallback(async () => {
     if (!peerId || historyFetching.current) return;
     historyFetching.current = true;
     setLoading(true);
     try {
-      const token = await getAuthToken();
-      if (!token) return;
-
-      const { data } = await axios.get(`${API_URL}/api/messages`, {
+      const { data } = await api.get('/messages', {
         params: { peerId },
-        headers: { Authorization: `Bearer ${token}` },
         timeout: 10_000,
       });
-
       if (Array.isArray(data)) {
         setMessages(data.map((m: any) => ({ ...m, status: "sent" as const })));
         tempIds.current.clear();
@@ -105,46 +99,44 @@ export default function UserDirectChatScreen() {
         Alert.alert(
           "Session Required",
           "You need a paid booking to chat with this psychiatrist.",
-          [{ text: "OK", onPress: () => router.back() }],
+          [{ text: "OK", onPress: () => router.back() }]
         );
       }
-      // 429 — just silently skip, messages already in state
     } finally {
       setLoading(false);
       historyFetching.current = false;
     }
   }, [peerId, getAuthToken]);
 
-  // ── Load peer name ────────────────────────────────────────────────────────
-  const loadPeerName = useCallback(async () => {
-    if (!peerId || peerFetching.current || peerName) return;
-    peerFetching.current = true;
-    try {
-      const token = await getAuthToken();
-      if (!token) return;
-
-      const { data } = await axios.get(`${API_URL}/api/bookings/my-psychiatrists`, {
-        headers: { Authorization: `Bearer ${token}` },
-        timeout: 10_000,
-      });
-
-      const match = (data.psychiatrists ?? []).find((p: any) => p.id === peerId);
-      if (match) setPeerName(match.full_name);
-    } catch {
-      // silently fail — header shows fallback
-    } finally {
-      peerFetching.current = false;
-    }
-  }, [peerId, getAuthToken, peerName]);
-
-  // Load once on mount only
   useEffect(() => {
     void loadHistory();
-    void loadPeerName();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [loadHistory]);
 
-  // ── Socket ────────────────────────────────────────────────────────────────
+  // If we navigated here because the global overlay already accepted the call,
+  // the psychiatrist side already received call-accepted and is in "incall".
+  // We need to also go incall. We detect this by listening for the psychiatrist
+  // emitting a webrtc-signal offer (they start WebRTC as initiator after call-accepted).
+  // Simpler: just check if there's a pending accepted call via a one-time call-accepted event.
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket || !peerId) return;
+
+    // One-time handler: if call-accepted arrives right after we mount
+    // (because global overlay already emitted call-accepted before navigation)
+    const onCallAcceptedOnMount = (data: { from: string; roomId: string }) => {
+      if (data.from !== peerId) return;
+      setCallRoomId(data.roomId);
+      callStartRef.current = Date.now();
+      setCallState("incall");
+      callStateRef.current = "incall";
+    };
+    socket.once("call-accepted", onCallAcceptedOnMount);
+
+    return () => {
+      socket.off("call-accepted", onCallAcceptedOnMount);
+    };
+  }, [peerId]);
+
   useEffect(() => {
     const socket = getSocket();
     if (!socket || !peerId) return;
@@ -162,7 +154,6 @@ export default function UserDirectChatScreen() {
       const senderId = msg.sender_id?.toString?.() ?? msg.from;
       const receiverId = msg.receiver_id?.toString?.() ?? msg.to;
       if (senderId !== peerId && receiverId !== peerId) return;
-
       setMessages((prev) => {
         const id = msg._id?.toString() ?? msg.id;
         if (prev.find((m) => m.id === id)) return prev;
@@ -181,31 +172,69 @@ export default function UserDirectChatScreen() {
       setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
     };
 
+    const onIncomingCall = (data: { from: string; roomId: string }) => {
+      setIncomingCaller(data.from);
+      setCallRoomId(data.roomId);
+      setCallState("ringing");
+      callStateRef.current = "ringing";
+      if (callTimerRef.current) clearTimeout(callTimerRef.current);
+      callTimerRef.current = setTimeout(() => {
+        setCallState("idle");
+        callStateRef.current = "idle";
+        setIncomingCaller(null);
+        setCallRoomId(null);
+      }, 45_000);
+    };
+
+    const onCallAccepted = (data: { from: string; roomId: string }) => {
+      if (callStateRef.current === "calling") {
+        setCallRoomId(data.roomId);
+        callStartRef.current = Date.now();
+        setCallState("incall");
+        callStateRef.current = "incall";
+        if (callTimerRef.current) clearTimeout(callTimerRef.current);
+      }
+    };
+
+    const onCallDeclined = ({ from }: { from?: string }) => {
+      if (from && from !== peerId) return;
+      setCallState("idle");
+      callStateRef.current = "idle";
+      setCallRoomId(null);
+      if (callTimerRef.current) clearTimeout(callTimerRef.current);
+    };
+
+    const onCallEnded = () => {
+      setCallState("idle");
+      callStateRef.current = "idle";
+      setCallRoomId(null);
+      setIncomingCaller(null);
+      if (callTimerRef.current) clearTimeout(callTimerRef.current);
+    };
+
     socket.on("message:new", onMessageNew);
     socket.on("receive-message", onReceive);
-    socket.on("incoming-call", (_: any) => {});
-    socket.on("call-accepted", () => {});
-    socket.on("call-declined", () => {});
-    socket.on("call-ended", () => {});
+    socket.on("incoming-call", onIncomingCall);
+    socket.on("call-accepted", onCallAccepted);
+    socket.on("call-declined", onCallDeclined);
+    socket.on("call-ended", onCallEnded);
 
     return () => {
       socket.off("message:new", onMessageNew);
       socket.off("receive-message", onReceive);
-      socket.off("incoming-call");
-      socket.off("call-accepted");
-      socket.off("call-declined");
-      socket.off("call-ended");
+      socket.off("incoming-call", onIncomingCall);
+      socket.off("call-accepted", onCallAccepted);
+      socket.off("call-declined", onCallDeclined);
+      socket.off("call-ended", onCallEnded);
     };
-  }, [peerId]);
+  }, [peerId]); // no callState dep — use callStateRef instead
 
-  // ── Send message ──────────────────────────────────────────────────────────
   const sendMessage = useCallback(async () => {
     if (!draft.trim() || !peerId || sending) return;
     setSending(true);
 
     const tempId = `temp-${Date.now()}-${Math.random()}`;
     const content = draft.trim();
-
     const optimistic: Message = {
       id: tempId,
       sender_id: currentUserId ?? "me",
@@ -221,24 +250,15 @@ export default function UserDirectChatScreen() {
     setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
 
     try {
-      const token = await getAuthToken();
-      if (!token) throw new Error("No auth token");
-
-      const { data } = await axios.post(
-        `${API_URL}/api/messages`,
+      const { data } = await api.post(
+        '/messages',
         { receiver_id: peerId, content },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-        },
+        { headers: { "Content-Type": "application/json" } }
       );
-
       setMessages((prev) => {
         tempIds.current.delete(tempId);
         return prev.map((m) =>
-          m.id === tempId ? { ...data, status: "sent" as const } : m,
+          m.id === tempId ? { ...data, status: "sent" as const } : m
         );
       });
     } catch (err: any) {
@@ -247,13 +267,9 @@ export default function UserDirectChatScreen() {
         status === 429
           ? "Sending too fast. Please wait a moment."
           : err?.response?.data?.error ?? err?.message ?? "Failed to send message";
-
       Alert.alert("Error", errMsg);
-
       setMessages((prev) =>
-        prev.map((m) =>
-          m.id === tempId ? { ...m, status: "error" as const } : m,
-        ),
+        prev.map((m) => (m.id === tempId ? { ...m, status: "error" as const } : m))
       );
       tempIds.current.delete(tempId);
     } finally {
@@ -261,9 +277,66 @@ export default function UserDirectChatScreen() {
     }
   }, [draft, peerId, currentUserId, sending, getAuthToken]);
 
-  const startCall = () => getSocket()?.emit("call-user", { to: peerId });
+  const startCall = useCallback(() => {
+    const socket = getSocket();
+    if (!socket || !peerId) return;
+    setCallState("calling");
+    callStateRef.current = "calling";
+    callStartRef.current = Date.now();
 
-  // ── Render ────────────────────────────────────────────────────────────────
+    socket.emit("call-user", { to: peerId }, (ack: { ok: boolean; error?: string }) => {
+      if (!ack?.ok) {
+        Alert.alert("Call Failed", ack?.error ?? "The user may be offline.");
+        setCallState("idle");
+        callStateRef.current = "idle";
+      }
+    });
+
+    callTimerRef.current = setTimeout(() => {
+      if (callStateRef.current === "calling") {
+        setCallState("idle");
+        callStateRef.current = "idle";
+        Alert.alert("No Answer", "The psychiatrist did not answer.");
+      }
+    }, 30_000);
+  }, [peerId]);
+
+  const acceptCall = useCallback(() => {
+    const socket = getSocket();
+    if (!socket || !incomingCaller || !callRoomId) return;
+    socket.emit("call-accepted", { to: incomingCaller, roomId: callRoomId });
+    callStartRef.current = Date.now();
+    setCallState("incall");
+    callStateRef.current = "incall";
+    if (callTimerRef.current) clearTimeout(callTimerRef.current);
+  }, [incomingCaller, callRoomId]);
+
+  const declineCall = useCallback(() => {
+    const socket = getSocket();
+    if (!socket || !incomingCaller) return;
+    socket.emit("call-declined", { to: incomingCaller });
+    setCallState("idle");
+    callStateRef.current = "idle";
+    setIncomingCaller(null);
+    setCallRoomId(null);
+    if (callTimerRef.current) clearTimeout(callTimerRef.current);
+  }, [incomingCaller]);
+
+  const endCall = useCallback(() => {
+    const socket = getSocket();
+    if (!socket) return;
+    const duration = callStartRef.current
+      ? Math.floor((Date.now() - callStartRef.current) / 1000)
+      : 0;
+    socket.emit("call-ended", { to: peerId, duration });
+    setCallState("idle");
+    callStateRef.current = "idle";
+    setIncomingCaller(null);
+    setCallRoomId(null);
+    callStartRef.current = 0;
+    if (callTimerRef.current) clearTimeout(callTimerRef.current);
+  }, [peerId]);
+
   const renderMessage = ({ item }: { item: Message }) => {
     const isMe = item.sender_id === currentUserId;
     return (
@@ -308,15 +381,22 @@ export default function UserDirectChatScreen() {
     );
   }
 
+  const displayName = peerName ? `Dr. ${peerName}` : "Doctor";
+
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
       <View style={styles.header}>
         <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
           <Feather name="chevron-left" size={28} color="#000" />
         </TouchableOpacity>
+        <View style={styles.avatar}>
+          <Text style={styles.avatarText}>
+            {peerName ? peerName.charAt(0).toUpperCase() : "D"}
+          </Text>
+        </View>
         <View style={styles.headerTitleContainer}>
           <Text style={styles.headerTitle} numberOfLines={1}>
-            {peerName ? `Dr. ${peerName}` : "Chat"}
+            {displayName}
           </Text>
           <Text style={styles.headerStatus}>Online</Text>
         </View>
@@ -333,9 +413,7 @@ export default function UserDirectChatScreen() {
         {messages.length === 0 ? (
           <View style={styles.center}>
             <Ionicons name="chatbubbles-outline" size={48} color="#d1d5db" />
-            <Text style={{ color: "#6b7280", marginTop: 12 }}>
-              No messages yet. Say hello!
-            </Text>
+            <Text style={{ color: "#6b7280", marginTop: 12 }}>No messages yet. Say hello!</Text>
           </View>
         ) : (
           <FlatList
@@ -344,12 +422,8 @@ export default function UserDirectChatScreen() {
             keyExtractor={(item) => item.id}
             renderItem={renderMessage}
             contentContainerStyle={styles.chatList}
-            onContentSizeChange={() =>
-              flatListRef.current?.scrollToEnd({ animated: true })
-            }
-            onLayout={() =>
-              flatListRef.current?.scrollToEnd({ animated: false })
-            }
+            onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+            onLayout={() => flatListRef.current?.scrollToEnd({ animated: false })}
           />
         )}
 
@@ -364,10 +438,7 @@ export default function UserDirectChatScreen() {
             editable={!sending}
           />
           <TouchableOpacity
-            style={[
-              styles.sendBtn,
-              (!draft.trim() || sending) && styles.sendBtnDisabled,
-            ]}
+            style={[styles.sendBtn, (!draft.trim() || sending) && styles.sendBtnDisabled]}
             onPress={sendMessage}
             disabled={!draft.trim() || sending}
           >
@@ -379,6 +450,17 @@ export default function UserDirectChatScreen() {
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
+
+      <VideoCallModal
+        callState={callState}
+        peerId={peerId ?? null}
+        peerName={displayName}
+        incomingCaller={incomingCaller}
+        callRoomId={callRoomId}
+        onAccept={acceptCall}
+        onDecline={declineCall}
+        onEnd={endCall}
+      />
     </SafeAreaView>
   );
 }
@@ -396,6 +478,16 @@ const styles = StyleSheet.create({
     borderBottomColor: "#e5e7eb",
   },
   backBtn: { padding: 5 },
+  avatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#2563eb",
+    justifyContent: "center",
+    alignItems: "center",
+    marginLeft: 5,
+  },
+  avatarText: { color: "#fff", fontSize: 18, fontWeight: "bold" },
   headerTitleContainer: { flex: 1, marginLeft: 10 },
   headerTitle: { fontSize: 18, fontWeight: "bold", color: "#111827" },
   headerStatus: { fontSize: 12, color: "#22c55e", marginTop: 2 },

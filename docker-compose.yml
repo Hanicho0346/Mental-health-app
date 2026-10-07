@@ -1,0 +1,118 @@
+x-api-env: &api-env
+  NODE_ENV: production
+  PORT: 5000
+  MONGODB_URI: mongodb://mongodb:27017/mentalhealth
+  REDIS_URL: redis://redis:6379
+  JWT_SECRET: ${JWT_SECRET}
+  JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+  JWT_ACCESS_EXPIRES_SEC: ${JWT_ACCESS_EXPIRES_SEC:-1800}
+  JWT_REFRESH_EXPIRES_DAYS: ${JWT_REFRESH_EXPIRES_DAYS:-30}
+  RESEND_API_KEY: ${RESEND_API_KEY:-}
+  EMAIL_FROM: ${EMAIL_FROM:-noreply@example.com}
+  EMAIL_REPLY_TO: ${EMAIL_REPLY_TO:-noreply@example.com}
+  CLIENT_URL: ${CLIENT_URL:-http://localhost:5000}
+  CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8081}
+  SOCKET_CORS_ORIGINS: ${SOCKET_CORS_ORIGINS:-}
+  SOCKET_MESSAGE_RATE_LIMIT_WINDOW_MS: ${SOCKET_MESSAGE_RATE_LIMIT_WINDOW_MS:-60000}
+  SOCKET_MESSAGE_RATE_LIMIT_MAX: ${SOCKET_MESSAGE_RATE_LIMIT_MAX:-60}
+  SOCKET_MAX_CONNECTIONS_PER_USER: ${SOCKET_MAX_CONNECTIONS_PER_USER:-3}
+  CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-}
+  CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY:-}
+  CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET:-}
+  CHAPA_SECRET_KEY: ${CHAPA_SECRET_KEY:-}
+  CHAPA_WEBHOOK_SECRET: ${CHAPA_WEBHOOK_SECRET:-}
+  CHAPA_RETURN_URL: ${CHAPA_RETURN_URL:-http://localhost:5000/payment-return}
+  API_BASE_URL: ${API_BASE_URL:-http://localhost:5000}
+  GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+  GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.8-flash}
+  EMAIL_VERIFICATION_ENABLED: ${EMAIL_VERIFICATION_ENABLED:-true}
+  BLOCK_UNVERIFIED_LOGIN: ${BLOCK_UNVERIFIED_LOGIN:-true}
+  RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-1000}
+  AUTH_RATE_LIMIT_MAX: ${AUTH_RATE_LIMIT_MAX:-300}
+  AUTH_RATE_LIMIT_WINDOW_MS: ${AUTH_RATE_LIMIT_WINDOW_MS:-900000}
+
+services:
+  mongodb:
+    image: mongo:7
+    container_name: mh-mongodb
+    restart: unless-stopped
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - mental-health-network
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  redis:
+    image: redis:7-alpine
+    container_name: mh-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    networks:
+      - mental-health-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: mh-api
+    restart: unless-stopped
+    environment:
+      <<: *api-env
+    ports:
+      - "5000:5000"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - mental-health-network
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  worker:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: mh-worker
+    restart: unless-stopped
+    command: ["node", "dist/worker.js"]
+    environment:
+      <<: *api-env
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "process.exit(0)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - mental-health-network
+
+networks:
+  mental-health-network:
+    name: mental-health-network
+
+volumes:
+  mongodb_data:
+  redis_data:

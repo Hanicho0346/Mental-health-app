@@ -7,13 +7,21 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
-    "seed:admin": "tsx scripts/seedAdmin.ts"
+    "worker": "node dist/worker.js",
+    "worker:dev": "tsx watch src/worker.ts",
+    "seed:admin": "tsx scripts/seedAdmin.ts",
+    "seed:reset": "tsx scripts/resetAndSeedUsers.ts",
+    "seed:members": "tsx scripts/seed70Members.ts",
+    "seed:70": "tsx scripts/seed70Members.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@clerk/backend": "^3.4.11",
     "@google/generative-ai": "^0.24.1",
     "axios": "^1.16.1",
     "bcryptjs": "^3.0.2",
+    "bullmq": "^5.49.2",
     "cloudinary": "^2.10.0",
     "compression": "^1.8.1",
     "cors": "^2.8.5",
@@ -23,11 +31,12 @@
     "express-mongo-sanitize": "^2.2.0",
     "express-rate-limit": "^8.5.2",
     "helmet": "^8.1.0",
+    "ioredis": "^5.6.1",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.9.3",
     "multer": "^2.1.1",
     "node-cron": "^4.2.1",
-    "nodemailer": "^8.0.7",
+    "resend": "^4.5.1",
     "socket.io": "^4.8.1",
     "streamifier": "^0.1.1",
     "zod": "^4.4.3"
@@ -41,9 +50,12 @@
     "@types/multer": "^2.1.0",
     "@types/node": "^22.10.5",
     "@types/node-cron": "^3.0.11",
-    "@types/nodemailer": "^8.0.0",
     "@types/react": "~19.2.10",
+    "@types/supertest": "^6.0.3",
+    "mongodb-memory-server": "^10.1.4",
+    "supertest": "^7.1.0",
     "tsx": "^4.22.3",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.9"
   }
 }

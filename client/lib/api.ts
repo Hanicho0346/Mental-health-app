@@ -35,10 +35,21 @@ const bareAuth = axios.create({
 });
 
 let refreshPromise: Promise<string | null> | null = null;
+let lastRefreshAttempt = 0;
 
 export async function refreshAccessToken(): Promise<string | null> {
+  const now = Date.now();
+  // Prevent spamming refresh requests (minimum 5s cooldown between attempts)
+  if (now - lastRefreshAttempt < 5000) {
+    return useAuthStore.getState().accessToken;
+  }
+  lastRefreshAttempt = now;
+
   const refreshToken = useAuthStore.getState().refreshToken;
-  if (!refreshToken) return null;
+  if (!refreshToken) {
+    await useAuthStore.getState().clearSession();
+    return null;
+  }
   try {
     const { data } = await bareAuth.post<{
       accessToken: string;
@@ -50,10 +61,10 @@ export async function refreshAccessToken(): Promise<string | null> {
       refreshToken: data.refreshToken,
       user: pickAuthUser(data.user as Record<string, unknown>),
     });
-   await AsyncStorage.multiSet([
-  ['token', data.accessToken],
-  ['refreshToken', data.refreshToken],
-]);
+    await AsyncStorage.multiSet([
+      ['token', data.accessToken],
+      ['refreshToken', data.refreshToken],
+    ]);
     return data.accessToken;
   } catch (e) {
     logClientError('api.refreshAccessToken', e);
@@ -92,7 +103,12 @@ api.interceptors.response.use(
       return Promise.reject(err);
     }
     const url = String(original.url ?? '');
-    if (err.response?.status === 401 && useAuthStore.getState().refreshToken && !url.includes('/auth/refresh')) {
+    if (
+      err.response?.status === 401 &&
+      useAuthStore.getState().refreshToken &&
+      !url.includes('/auth/refresh') &&
+      !url.includes('/auth/login')
+    ) {
       original._retry = true;
       if (!refreshPromise) {
         refreshPromise = refreshAccessToken().finally(() => {
@@ -101,6 +117,7 @@ api.interceptors.response.use(
       }
       const nextToken = await refreshPromise;
       if (nextToken) {
+        original.headers = original.headers || {};
         original.headers.Authorization = `Bearer ${nextToken}`;
         return api(original);
       }

@@ -1,6 +1,5 @@
 import { create } from "zustand";
-import axios from 'axios';
-import { API_URL } from "@/lib/api";
+import { api } from "@/lib/api";
 
 export type ChatUser = {
   _id: string;
@@ -62,7 +61,7 @@ type ChatState = {
    setTimeline: (items: TimelineItem[]) => void;
    appendMessage: (msg: ChatMessage) => void;
    appendCallLog: (log: CallLog) => void;
-   loadConversations: (token: string) => Promise<void>;
+   loadConversations: (token?: string) => Promise<void>;
    clear: () => void;
 };
 
@@ -112,41 +111,35 @@ export const useChatStore = create<ChatState>((set, get) => ({
       ),
     })),
 
-  loadConversations: async (token: string) => {
-  try {
-    set({ loading: true });
-    
-    const response = await axios.get(`${API_URL}/api/messages/conversations`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    
-    if (response.data && Array.isArray(response.data)) {
-      const conversations: Conversation[] = response.data.map((conv: any) => ({
+  loadConversations: async (_token?: string) => {
+    try {
+      set({ loading: true });
+      const { data } = await api.get<unknown[]>('/conversations/my-conversations');
+      if (!Array.isArray(data)) return;
+
+      const conversations: Conversation[] = data.map((conv: any) => ({
         peerId:          conv.peerId          || conv.userId || conv._id,
-        peerName:        conv.peerName        || conv.full_name || conv.name || "User", // ← peerName first
-        lastMessage:     conv.lastMessage     || conv.last_message || "No messages yet",
+        peerName:        conv.peerName        || conv.full_name || conv.name || 'User',
+        lastMessage:     conv.lastMessage     || conv.last_message || 'No messages yet',
         lastMessageTime: conv.lastMessageTime || conv.last_message_time,
         unreadCount:     conv.unreadCount     || conv.unread_count || 0,
         isOnline:        conv.isOnline        || conv.is_online || false,
       }));
-      
       set({ conversations });
 
-      const users: ChatUser[] = response.data.map((conv: any) => ({
-        _id:        conv.peerId    || conv.userId || conv._id,
-        full_name:  conv.peerName  || conv.full_name || conv.name || "User", // ← peerName first
-        is_online:  conv.isOnline  || conv.is_online || false,
-        avatar_url: conv.peerAvatar || conv.avatar || "",
+      const users: ChatUser[] = data.map((conv: any) => ({
+        _id:        conv.peerId     || conv.userId || conv._id,
+        full_name:  conv.peerName   || conv.full_name || conv.name || 'User',
+        is_online:  conv.isOnline   || conv.is_online || false,
+        avatar_url: conv.peerAvatar || conv.avatar_url || '',
       }));
-      
       set({ users });
+    } catch {
+      // Errors are handled by the api interceptor; store stays with previous state
+    } finally {
+      set({ loading: false });
     }
-  } catch (error) {
-    console.error("Error loading conversations:", error);
-  } finally {
-    set({ loading: false });
-  }
-},
+  },
 
   clear: () =>
     set({

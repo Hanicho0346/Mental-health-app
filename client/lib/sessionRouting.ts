@@ -3,6 +3,8 @@ import type { AuthUser } from '@/stores/authStore';
 export type AppRoute =
   | '/(tabs)/(user-tabs)/home'
   | '/(tabs)/(psychiatrist-tabs)/dashboard'
+  | '/psychiatrist-pending'
+  | '/psychiatrist-rejected'
   | '/(admin)';
 
 export function resolvePostAuthRoute(
@@ -20,6 +22,12 @@ export function resolvePostAuthRoute(
 
   // psychiatrist
   if (user.role === 'psychiatrist') {
+    if (user.verification_status === 'rejected') {
+      return '/psychiatrist-rejected';
+    }
+    if (!user.is_approved && user.verification_status !== 'approved') {
+      return '/psychiatrist-pending';
+    }
     return '/(tabs)/(psychiatrist-tabs)/dashboard';
   }
 

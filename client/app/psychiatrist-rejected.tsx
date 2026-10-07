@@ -1,5 +1,4 @@
 import { useAuthStore } from '@/stores/authStore';
-import { useClerkBackendSession } from '@/hooks/useClerkBackendSession';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React from 'react';
@@ -8,7 +7,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function PsychiatristRejectedScreen() {
   const user = useAuthStore((s) => s.user);
-  const { syncSession } = useClerkBackendSession();
 
   return (
     <SafeAreaView style={s.container}>
@@ -40,9 +38,7 @@ export default function PsychiatristRejectedScreen() {
 
         <TouchableOpacity
           style={s.secondaryBtn}
-          onPress={() => {
-            void syncSession().then(() => router.replace('/psychiatrist-pending'));
-          }}
+          onPress={() => router.replace('/psychiatrist-pending')}
         >
           <Text style={s.secondaryBtnText}>Resubmit documents</Text>
         </TouchableOpacity>

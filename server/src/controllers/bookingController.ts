@@ -9,9 +9,11 @@ import {
   getWalletForUser,
   listAllWalletTransactions,
 } from './booking.service.js';
+import { verifyChapaWebhookSignature } from '../utils/chapaWebhook.js';
 
 const BASE_URL   = process.env.API_BASE_URL ?? 'http://localhost:4000';
 const RETURN_URL = process.env.CHAPA_RETURN_URL ?? `${BASE_URL}/payment-return`;
+const WEBHOOK_SECRET = process.env.CHAPA_WEBHOOK_SECRET ?? '';
 
 // POST /api/bookings/initiate
 export const initiateBookingHandler: RequestHandler = async (req, res, next) => {
@@ -52,11 +54,16 @@ export const verifyPaymentHandler: RequestHandler = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-// Chapa server-to-server webhook (no auth)
+// Chapa server-to-server webhook (signature verified when CHAPA_WEBHOOK_SECRET is set)
 export const chapaCallbackHandler: RequestHandler = async (req, res, next) => {
   try {
+    if (!verifyChapaWebhookSignature(req, res, WEBHOOK_SECRET)) return;
+
     const tx_ref = (req.query['trx_ref'] as string) ?? req.body?.trx_ref ?? req.body?.tx_ref;
-    if (!tx_ref) { res.status(400).json({ error: 'trx_ref missing' }); return; }
+    if (!tx_ref || typeof tx_ref !== 'string') {
+      res.status(400).json({ error: 'trx_ref missing' });
+      return;
+    }
     await verifyAndCompleteBooking(tx_ref);
     res.json({ ok: true });
   } catch (err) { next(err); }

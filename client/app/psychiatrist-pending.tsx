@@ -1,6 +1,6 @@
 import { api } from '@/lib/api';
 import { getApiErrorMessage } from '@/lib/log';
-import { useAuthStore } from '@/stores/authStore';
+import { pickAuthUser, useAuthStore } from '@/stores/authStore';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
@@ -8,6 +8,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -15,13 +16,12 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useClerkBackendSession } from '@/hooks/useClerkBackendSession';
 import { resolvePostAuthRoute } from '@/lib/sessionRouting';
 
 export default function PsychiatristPendingScreen() {
   const user = useAuthStore((s) => s.user);
-  const { syncSession, syncing } = useClerkBackendSession();
   const [statusLoading, setStatusLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [feedback, setFeedback] = useState('');
 
@@ -33,7 +33,18 @@ export default function PsychiatristPendingScreen() {
         admin_feedback?: string;
       }>('/psychiatrist/verification/status');
       if (data.verification_status === 'approved') {
-        await syncSession();
+        try {
+          const meRes = await api.get<Record<string, unknown>>('/users/me');
+          const accessToken = useAuthStore.getState().accessToken ?? '';
+          const refreshToken = useAuthStore.getState().refreshToken ?? '';
+          useAuthStore.getState().setSession({
+            accessToken,
+            refreshToken,
+            user: pickAuthUser(meRes.data),
+          });
+        } catch {
+          /* route with existing store user */
+        }
         router.replace(resolvePostAuthRoute(useAuthStore.getState().user));
         return;
       }
@@ -46,8 +57,9 @@ export default function PsychiatristPendingScreen() {
       /* pending flow — user may lack full API access until profile exists */
     } finally {
       setStatusLoading(false);
+      setRefreshing(false);
     }
-  }, [syncSession]);
+  }, []);
 
   useEffect(() => {
     void refreshStatus();
@@ -69,14 +81,24 @@ export default function PsychiatristPendingScreen() {
     try {
       const asset = picked.assets[0];
       const form = new FormData();
-      form.append('document', {
-        uri: asset.uri,
-        name: 'license.jpg',
-        type: asset.mimeType ?? 'image/jpeg',
-      } as unknown as Blob);
+      if (Platform.OS === 'web') {
+        if ((asset as any).file instanceof File || (asset as any).file instanceof Blob) {
+          form.append('document', (asset as any).file, asset.fileName ?? 'license.jpg');
+        } else {
+          const res = await fetch(asset.uri);
+          const blob = await res.blob();
+          form.append('document', blob, asset.fileName ?? 'license.jpg');
+        }
+      } else {
+        form.append('document', {
+          uri: asset.uri,
+          name: asset.fileName ?? 'license.jpg',
+          type: asset.mimeType ?? 'image/jpeg',
+        } as unknown as Blob);
+      }
       form.append('document_type', 'license');
 
-      await api.post('/psychiatrist/verification/documents', form, {
+      await api.post('/psychiatrist/verification/documents', form, Platform.OS === 'web' ? undefined : {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       Alert.alert('Uploaded', 'Your document was submitted for review.');
@@ -133,10 +155,13 @@ export default function PsychiatristPendingScreen() {
 
             <TouchableOpacity
               style={s.secondaryBtn}
-              onPress={() => void refreshStatus()}
-              disabled={syncing}
+              onPress={() => {
+                setRefreshing(true);
+                void refreshStatus();
+              }}
+              disabled={refreshing}
             >
-              {syncing ? (
+              {refreshing ? (
                 <ActivityIndicator color="#4ADE80" />
               ) : (
                 <Text style={s.secondaryBtnText}>Refresh status</Text>

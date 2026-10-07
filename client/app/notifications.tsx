@@ -1,3 +1,4 @@
+import { shadowStyle } from "@/lib/shadow";
 /**
  * NotificationsScreen.tsx
  *
@@ -580,11 +581,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
     justifyContent: "center",
     alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
-    elevation: 2,
+    ...shadowStyle({ color: "#000", offset: { width: 0, height: 2 }, opacity: 0.06, radius: 6, elevation: 2 }),
   },
   emptyTitle: {
     fontSize: 18,

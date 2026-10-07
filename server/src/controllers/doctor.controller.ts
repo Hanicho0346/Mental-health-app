@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 import mongoose from 'mongoose';
-
+import { logServerError } from '../utils/logger.js';
 import doctorService from '../services/doctor.service.js';
 
 function unauthorized(res: Response): void {
@@ -16,10 +16,8 @@ export async function getDashboardStats(req: Request, res: Response): Promise<vo
     const stats = await doctorService.getDashboardStats(req.userId);
     res.status(200).json(stats);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({
-      message: 'Failed to fetch dashboard stats',
-    });
+    logServerError('doctor.getDashboardStats', err, { userId: req.userId });
+    res.status(500).json({ message: 'Failed to fetch dashboard stats' });
   }
 }
 
@@ -32,10 +30,8 @@ export async function getUrgentAlerts(req: Request, res: Response): Promise<void
     const alerts = await doctorService.getUrgentAlerts(req.userId);
     res.status(200).json(alerts);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({
-      message: 'Failed to fetch alerts',
-    });
+    logServerError('doctor.getUrgentAlerts', err, { userId: req.userId });
+    res.status(500).json({ message: 'Failed to fetch alerts' });
   }
 }
 
@@ -48,10 +44,8 @@ export async function getTodayAppointments(req: Request, res: Response): Promise
     const appointments = await doctorService.getAppointmentsForDate(req.userId, new Date());
     res.status(200).json(appointments);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({
-      message: "Failed to fetch today's appointments",
-    });
+    logServerError('doctor.getTodayAppointments', err, { userId: req.userId });
+    res.status(500).json({ message: "Failed to fetch today's appointments" });
   }
 }
 
@@ -74,10 +68,8 @@ export async function getAppointmentsByDate(req: Request, res: Response): Promis
     const appointments = await doctorService.getAppointmentsForDate(req.userId, parsed);
     res.status(200).json(appointments);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({
-      message: 'Failed to fetch appointments for selected date',
-    });
+    logServerError('doctor.getAppointmentsByDate', err, { userId: req.userId });
+    res.status(500).json({ message: 'Failed to fetch appointments for selected date' });
   }
 }
 export async function getSupportVideos(req: Request, res: Response): Promise<void> {
@@ -85,7 +77,7 @@ export async function getSupportVideos(req: Request, res: Response): Promise<voi
     const videos = await doctorService.getSupportVideos();
     res.status(200).json(videos);
   } catch (err) {
-    console.error(err);
+    logServerError('doctor.getSupportVideos', err);
     res.status(500).json({ message: 'Failed to fetch videos' });
   }
 }
@@ -99,7 +91,7 @@ export async function getPatients(req: Request, res: Response): Promise<void> {
     const patients = await doctorService.listPatientsForPsychiatrist(req.userId);
     res.status(200).json(patients);
   } catch (err) {
-    console.error(err);
+    logServerError('doctor.getPatients', err, { userId: req.userId });
     res.status(500).json({ message: 'Failed to fetch patients list' });
   }
 }
@@ -122,7 +114,7 @@ export async function getPatientProfile(req: Request, res: Response): Promise<vo
     }
     res.status(200).json(profile);
   } catch (err) {
-    console.error(err);
+    logServerError('doctor.getPatientProfile', err, { userId: req.userId, patientId: req.params.patientId });
     res.status(500).json({ message: 'Failed to fetch patient profile' });
   }
 }
@@ -133,6 +125,7 @@ export async function getCloudinarySignature(req: Request, res: Response): Promi
     const signature = await doctorService.generateUploadSignature();
     res.status(200).json(signature);
   } catch (err) {
+    logServerError('doctor.getCloudinarySignature', err, { userId: req.userId });
     res.status(500).json({ message: 'Failed to generate upload signature' });
   }
 }
@@ -141,7 +134,13 @@ export async function saveVideoRecord(req: Request, res: Response): Promise<void
   if (!req.userId || !req.auth) { unauthorized(res); return; }
   try {
     const { title, amharicTitle, tag, videoUrl, publicId } = req.body as Record<string, string>;
-    if (!videoUrl) { res.status(400).json({ message: 'videoUrl is required' }); return; }
+    if (!videoUrl?.trim()) { res.status(400).json({ message: 'videoUrl is required' }); return; }
+    if (typeof title !== 'string' || title.trim().length > 200) {
+      res.status(400).json({ message: 'title must be a string under 200 characters' }); return;
+    }
+    if (!/^https:\/\//.test(videoUrl.trim())) {
+      res.status(400).json({ message: 'videoUrl must be an HTTPS URL' }); return;
+    }
     const newVideo = await doctorService.saveVideoRecord(req.userId, {
       title: title ?? '',
       amharicTitle: amharicTitle ?? '',
@@ -151,7 +150,7 @@ export async function saveVideoRecord(req: Request, res: Response): Promise<void
     });
     res.status(201).json({ message: 'Video saved successfully', video: newVideo });
   } catch (err) {
-    console.error('Controller Error:', err);
+    logServerError('doctor.saveVideoRecord', err, { userId: req.userId });
     res.status(500).json({ message: err instanceof Error ? err.message : 'Failed to save video' });
   }
 }
@@ -170,7 +169,7 @@ export async function incrementVideoListen(req: Request, res: Response): Promise
     }
     res.status(200).json({ listens: video.listens });
   } catch (err) {
-    console.error(err);
+    logServerError('doctor.incrementVideoListen', err, { videoId: req.params.id });
     res.status(500).json({ message: 'Failed to update listen count' });
   }
 }
@@ -193,7 +192,7 @@ export async function toggleVideoFavorite(req: Request, res: Response): Promise<
     }
     res.status(200).json({ isFavorite: result.isFavorite });
   } catch (err) {
-    console.error(err);
+    logServerError('doctor.toggleVideoFavorite', err, { userId: req.userId, videoId: req.params.id });
     res.status(500).json({ message: 'Failed to toggle favorite' });
   }
 }

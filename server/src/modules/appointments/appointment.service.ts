@@ -3,6 +3,8 @@ import { Appointment } from "../../models/Appointment.js";
 import { User } from "../../models/User.js";
 import type { UserRole } from "../../types/roles.js";
 import { AppError } from "../../utils/AppError.js";
+import { redisService } from "../../integrations/redis/redis.service.js";
+import { notifyAppointmentCreated } from "../../services/appointment-notifications.service.js";
 
 /**
  * DTO
@@ -18,10 +20,16 @@ export type CounselorPublicDto = {
   reviews: number;
 };
 
+const COUNSELORS_CACHE_KEY = 'cache:counselors';
+const COUNSELORS_CACHE_TTL = 60;
+
 /**
  * ⚡ SINGLE SOURCE OF TRUTH (DB ONLY)
  */
 export async function listPublicCounselors(): Promise<CounselorPublicDto[]> {
+  const cached = await redisService.getJson<CounselorPublicDto[]>(COUNSELORS_CACHE_KEY);
+  if (cached) return cached;
+
   const counselors = await User.find({
     role: "psychiatrist",
     verification_status: "approved",
@@ -31,7 +39,7 @@ export async function listPublicCounselors(): Promise<CounselorPublicDto[]> {
     .limit(50)
     .exec();
 
-  return (counselors as any[]).map((u) => ({
+  const result = (counselors as any[]).map((u) => ({
     id: u._id.toString(),
     full_name: u.full_name,
     full_name_am: "",
@@ -43,6 +51,9 @@ export async function listPublicCounselors(): Promise<CounselorPublicDto[]> {
     rating: 0,
     reviews: 0,
   }));
+
+  await redisService.setJsonWithTTL(COUNSELORS_CACHE_KEY, result, COUNSELORS_CACHE_TTL);
+  return result;
 }
 
 /**
@@ -147,6 +158,19 @@ export async function createPatientAppointment(
     scheduled_at: scheduledAt,
     time_label: input.time_label.trim(),
   });
+
+  const patient = await User.findById(patientUserId).select('email full_name').lean();
+  if (patient?.email) {
+    void notifyAppointmentCreated({
+      appointmentId: doc._id.toString(),
+      userId: patientUserId,
+      email: patient.email,
+      fullName: patient.full_name,
+      counselorName: resolved.counselor_name,
+      scheduledAt,
+      timeLabel: input.time_label.trim(),
+    }).catch(() => undefined);
+  }
 
   return mapAppointment(doc);
 }

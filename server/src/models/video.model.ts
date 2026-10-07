@@ -39,6 +39,9 @@ const videoSchema = new Schema(
   }
 );
 
+videoSchema.index({ createdAt: -1 });
+videoSchema.index({ category: 1, createdAt: -1 });
+
 export type VideoDocument = InferSchemaType<typeof videoSchema> & {
   _id: mongoose.Types.ObjectId;
 };

@@ -1,37 +1,10 @@
 /**
  * PSYCHIATRIST SIDE — Direct chat with a patient/user
- *
- * FIXES (modelled on the working UserDirectChatScreen):
- *
- * FIX-A: Message history mapping
- *   Old code re-mapped fields: m.from → sender_id, m.to → receiver_id,
- *   m.timestamp → created_at. The API returns messages already shaped as
- *   { sender_id, receiver_id, content, created_at, id } (same contract the
- *   user chat relies on). Spreading { ...m, status: "sent" } — exactly what
- *   the user chat does — keeps the field names correct and avoids a situation
- *   where sender_id is undefined and isMe is always false.
- *
- * FIX-B: getToken({ template: "backend" }) everywhere
- *   sendMessageViaAPI was calling getToken() with no template, so the server
- *   received a raw Clerk session token instead of a backend JWT. The backend
- *   JWT middleware resolves the token to a MongoDB _id and populates
- *   req.userId. Without the template the middleware can't resolve the user,
- *   so the sender_id stored on the message is wrong (or the request fails
- *   with 401). Every axios call now uses getToken({ template: "backend" }).
- *
- * FIX-C: currentUserId sourced correctly
- *   me?.userId is whatever the chatStore's /api/auth/me call returns.
- *   If the store returns the field as _id (MongoDB ObjectId string) rather
- *   than userId, the comparison item.sender_id === currentUserId is always
- *   false. Mirror the user chat exactly: use me?.userId, but add a fallback
- *   comment so the team knows to check the store shape if bubbles still
- *   appear on the wrong side.
- *
- * All other features (video call modals, socket handlers, styles) preserved.
  */
-
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
+  ActivityIndicator,
+  Alert,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -40,19 +13,14 @@ import {
   TextInput,
   TouchableOpacity,
   View,
-  Modal,
-  Alert,
-  ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Feather, Ionicons, MaterialIcons } from "@expo/vector-icons";
+import { Feather, Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
+import { api } from "@/lib/api";
 import { getSocket } from "@/lib/socket";
 import { useChatStore } from "@/stores/chatStore";
-import { useAuth } from "@clerk/clerk-expo";
-import axios from "axios";
-import { API_URL } from "@/lib/api";
-import { getStoredAuthToken } from "@/lib/auth";
+import VideoCallModal, { type CallState } from "@/components/VideoCallModal";
 
 type Message = {
   id: string;
@@ -65,15 +33,8 @@ type Message = {
 
 export default function PsychiatristDirectChatScreen() {
   const { peer: peerId } = useLocalSearchParams<{ peer: string }>();
-  const { getToken } = useAuth();
-
   const me = useChatStore((s) => s.me);
   const conversations = useChatStore((s) => s.conversations);
-
-  // NOTE: if bubbles still appear on the wrong side, check what field
-  // chatStore.me uses. It must match the sender_id field coming back from
-  // /api/messages. Common mismatch: store uses _id but component reads userId.
-  // In PsychiatristDirectChatScreen:
   const currentUserId = me?._id ?? me?.userId;
 
   const [messages, setMessages] = useState<Message[]>([]);
@@ -85,23 +46,27 @@ export default function PsychiatristDirectChatScreen() {
   const flatListRef = useRef<FlatList>(null);
   const tempMessageIds = useRef<Set<string>>(new Set());
 
-  // Video Call States
-  const [callState, setCallState] = useState<
-    "idle" | "calling" | "ringing" | "incall"
-  >("idle");
+  const [callState, setCallState] = useState<CallState>("idle");
   const [incomingCaller, setIncomingCaller] = useState<string | null>(null);
+  const [callRoomId, setCallRoomId] = useState<string | null>(null);
+  const callTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const callStartRef = useRef<number>(0);
+  // Ref mirrors callState to avoid stale closures in socket handlers
+  const callStateRef = useRef<CallState>("idle");
   const peerNameFetched = useRef(false);
-  const getTokenRef = useRef(getToken);
+
   useEffect(() => {
-    getTokenRef.current = getToken;
-  });
+    callStateRef.current = callState;
+  }, [callState]);
+
   // ── Resolve peer name ──────────────────────────────────────────────────
   useEffect(() => {
     if (!peerId || peerNameFetched.current) return;
 
+    // Try store first (instant)
     if (conversations?.length > 0) {
       const match = conversations.find(
-        (c: any) => c.peerId === peerId || c._id === peerId,
+        (c: any) => c.peerId === peerId || c._id === peerId
       );
       if (match?.peerName && match.peerName !== peerId) {
         setPeerName(match.peerName);
@@ -110,48 +75,26 @@ export default function PsychiatristDirectChatScreen() {
       }
     }
 
+    // Fall back to API — mark fetched only after success to allow one retry
     peerNameFetched.current = true;
-
     const fetchPeerName = async () => {
       try {
-        const token =
-          (await getStoredAuthToken()) ??
-          (await getTokenRef.current({ template: "backend" }));
-        if (!token) return;
-        const { data } = await axios.get(`${API_URL}/api/users/${peerId}`, {
-          headers: { Authorization: `Bearer ${token}` },
-          timeout: 5000,
-        });
+        const { data } = await api.get(`/users/peer/${peerId}`, { timeout: 5000 });
         if (data?.full_name) setPeerName(data.full_name);
-      } catch (e: any) {
-        if (e?.response?.status === 404) {
-          console.warn("[Chat] Peer user not found:", peerId);
-        }
+      } catch {
+        // silently ignore — header shows truncated id as fallback
       }
     };
-
     void fetchPeerName();
-  }, [peerId]);
+  }, [peerId, conversations]);
 
   // ── Load history ───────────────────────────────────────────────────────
-  // FIX-A + FIX-B: use backend token; spread message directly like user chat does
   const loadChatHistory = useCallback(async () => {
-    if (!peerId) {
-      setLoading(false);
-      return;
-    }
+    if (!peerId) { setLoading(false); return; }
     try {
       setLoading(true);
-      const token =
-        (await getStoredAuthToken()) ??
-        (await getTokenRef.current({ template: "backend" }));
-      if (!token) {
-        setLoading(false);
-        return;
-      }
-      const { data } = await axios.get(`${API_URL}/api/messages`, {
+      const { data } = await api.get('/messages', {
         params: { peerId },
-        headers: { Authorization: `Bearer ${token}` },
         timeout: 10000,
       });
       if (Array.isArray(data)) {
@@ -161,17 +104,14 @@ export default function PsychiatristDirectChatScreen() {
           .filter((m) => { if (seen.has(m.id)) return false; seen.add(m.id); return true; });
         setMessages(unique);
         tempMessageIds.current.clear();
-        setTimeout(
-          () => flatListRef.current?.scrollToEnd({ animated: false }),
-          100,
-        );
+        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: false }), 100);
       }
     } catch (error: any) {
       if (error?.response?.status === 403) {
         Alert.alert(
           "Session Required",
           "You need an active paid session to access this chat.",
-          [{ text: "OK", onPress: () => router.back() }],
+          [{ text: "OK", onPress: () => router.back() }]
         );
       }
     } finally {
@@ -180,10 +120,8 @@ export default function PsychiatristDirectChatScreen() {
   }, [peerId]);
 
   // ── Send via REST ──────────────────────────────────────────────────────
-  // FIX-B: always use { template: "backend" } so server can resolve MongoDB _id
   const sendMessage = useCallback(async () => {
     if (!draft.trim() || !peerId || sending) return;
-
     setSending(true);
     const tempId = `temp-${Date.now()}-${Math.random()}`;
     tempMessageIds.current.add(tempId);
@@ -203,45 +141,32 @@ export default function PsychiatristDirectChatScreen() {
     setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
 
     try {
-      const token =
-        (await getStoredAuthToken()) ??
-        (await getToken({ template: "backend" }));
-      if (!token) throw new Error("No auth token");
-
-      const { data } = await axios.post(
-        `${API_URL}/api/messages`,
+      const { data } = await api.post(
+        '/messages',
         { receiver_id: peerId, content },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-        },
+        { headers: { "Content-Type": "application/json" } }
       );
-
       setMessages((prev) => {
         tempMessageIds.current.delete(tempId);
         const updated = prev.map((m) =>
-          m.id === tempId ? { ...data, id: data.id ?? data._id?.toString(), status: "sent" as const } : m,
+          m.id === tempId
+            ? { ...data, id: data.id ?? data._id?.toString(), status: "sent" as const }
+            : m
         );
-        // deduplicate by id in case socket already delivered this message
         const seen = new Set<string>();
         return updated.filter((m) => { if (seen.has(m.id)) return false; seen.add(m.id); return true; });
       });
     } catch (err: any) {
-      const errMsg =
-        err?.response?.data?.error || err?.message || "Failed to send message";
+      const errMsg = err?.response?.data?.error || err?.message || "Failed to send message";
       Alert.alert("Error", errMsg);
       setMessages((prev) =>
-        prev.map((m) =>
-          m.id === tempId ? { ...m, status: "error" as const } : m,
-        ),
+        prev.map((m) => (m.id === tempId ? { ...m, status: "error" as const } : m))
       );
       tempMessageIds.current.delete(tempId);
     } finally {
       setSending(false);
     }
-  }, [draft, peerId, currentUserId, sending, getToken]);
+  }, [draft, peerId, currentUserId, sending]);
 
   // ── Socket ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -254,10 +179,7 @@ export default function PsychiatristDirectChatScreen() {
         if (prev.find((m) => m.id === data.id)) return prev;
         return [...prev, { ...data, status: "sent" as const }];
       });
-      setTimeout(
-        () => flatListRef.current?.scrollToEnd({ animated: true }),
-        100,
-      );
+      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
     };
 
     const onReceiveMessage = (msg: any) => {
@@ -274,26 +196,59 @@ export default function PsychiatristDirectChatScreen() {
             sender_id: senderId,
             receiver_id: receiverId,
             content: msg.content,
-            created_at:
-              msg.created_at ?? msg.timestamp ?? new Date().toISOString(),
+            created_at: msg.created_at ?? msg.timestamp ?? new Date().toISOString(),
             status: "sent" as const,
           },
         ];
       });
-      setTimeout(
-        () => flatListRef.current?.scrollToEnd({ animated: true }),
-        100,
-      );
+      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
     };
 
-    const onIncomingCall = ({ from }: { from: string }) => {
+    const onIncomingCall = ({ from, roomId }: { from: string; roomId?: string }) => {
       setIncomingCaller(from);
+      if (roomId) setCallRoomId(roomId);
       setCallState("ringing");
+      callStateRef.current = "ringing";
+      if (callTimerRef.current) clearTimeout(callTimerRef.current);
+      callTimerRef.current = setTimeout(() => {
+        setCallState("idle");
+        callStateRef.current = "idle";
+        setIncomingCaller(null);
+        setCallRoomId(null);
+      }, 45_000);
     };
+
+    const onCallAccepted = ({ from, roomId }: { from: string; roomId?: string }) => {
+      if (callStateRef.current === "calling") {
+        if (roomId) setCallRoomId(roomId);
+        callStartRef.current = Date.now();
+        setCallState("incall");
+        callStateRef.current = "incall";
+        if (callTimerRef.current) clearTimeout(callTimerRef.current);
+      }
+    };
+
+    const onCallDeclined = ({ from }: { from?: string }) => {
+      if (from && from !== peerId) return;
+      setCallState("idle");
+      callStateRef.current = "idle";
+      setIncomingCaller(null);
+      setCallRoomId(null);
+      if (callTimerRef.current) clearTimeout(callTimerRef.current);
+    };
+
+    const onCallEnded = () => {
+      setCallState("idle");
+      callStateRef.current = "idle";
+      setIncomingCaller(null);
+      setCallRoomId(null);
+      if (callTimerRef.current) clearTimeout(callTimerRef.current);
+    };
+
     socket.on("incoming-call", onIncomingCall);
-    socket.on("call-accepted", () => setCallState("incall"));
-    socket.on("call-declined", () => setCallState("idle"));
-    socket.on("call-ended", () => setCallState("idle"));
+    socket.on("call-accepted", onCallAccepted);
+    socket.on("call-declined", onCallDeclined);
+    socket.on("call-ended", onCallEnded);
     socket.on("message:new", onMessageNew);
     socket.on("receive-message", onReceiveMessage);
 
@@ -301,31 +256,83 @@ export default function PsychiatristDirectChatScreen() {
       socket.off("message:new", onMessageNew);
       socket.off("receive-message", onReceiveMessage);
       socket.off("incoming-call", onIncomingCall);
-      socket.off("call-accepted");
-      socket.off("call-declined");
-      socket.off("call-ended");
+      socket.off("call-accepted", onCallAccepted);
+      socket.off("call-declined", onCallDeclined);
+      socket.off("call-ended", onCallEnded);
     };
-  }, [peerId]);
+  }, [peerId]); // no callState dep — use callStateRef instead
 
   useEffect(() => {
     void loadChatHistory();
   }, [loadChatHistory]);
 
-  const startCall = () => getSocket()?.emit("call-user", { to: peerId });
+  const startCall = () => {
+    const socket = getSocket();
+    if (!socket || !peerId) return;
+    setCallState("calling");
+    callStateRef.current = "calling";
+    callStartRef.current = Date.now();
+
+    socket.emit("call-user", { to: peerId }, (ack: { ok: boolean; error?: string }) => {
+      if (!ack?.ok) {
+        Alert.alert("Call Failed", ack?.error ?? "The user may be offline.");
+        setCallState("idle");
+        callStateRef.current = "idle";
+      }
+    });
+
+    callTimerRef.current = setTimeout(() => {
+      if (callStateRef.current === "calling") {
+        setCallState("idle");
+        callStateRef.current = "idle";
+        Alert.alert("No Answer", "The patient did not answer.");
+      }
+    }, 30_000);
+  };
+
+  const acceptCall = () => {
+    const socket = getSocket();
+    if (!socket || !incomingCaller) return;
+    socket.emit("call-accepted", { to: incomingCaller, roomId: callRoomId ?? undefined });
+    callStartRef.current = Date.now();
+    setCallState("incall");
+    callStateRef.current = "incall";
+    if (callTimerRef.current) clearTimeout(callTimerRef.current);
+  };
+
+  const declineCall = () => {
+    const socket = getSocket();
+    if (!socket || !incomingCaller) return;
+    socket.emit("call-declined", { to: incomingCaller });
+    setCallState("idle");
+    callStateRef.current = "idle";
+    setIncomingCaller(null);
+    setCallRoomId(null);
+    if (callTimerRef.current) clearTimeout(callTimerRef.current);
+  };
+
+  const endCall = () => {
+    const socket = getSocket();
+    if (!socket) return;
+    const duration = callStartRef.current
+      ? Math.floor((Date.now() - callStartRef.current) / 1000)
+      : 0;
+    socket.emit("call-ended", { to: peerId, duration });
+    setCallState("idle");
+    callStateRef.current = "idle";
+    setIncomingCaller(null);
+    setCallRoomId(null);
+    callStartRef.current = 0;
+    if (callTimerRef.current) clearTimeout(callTimerRef.current);
+  };
 
   // ── Render ─────────────────────────────────────────────────────────────
   const renderMessage = ({ item }: { item: Message }) => {
     const isMe = item.sender_id === currentUserId;
     return (
-      <View
-        style={[styles.msgWrapper, isMe ? styles.msgRight : styles.msgLeft]}
-      >
-        <View
-          style={[styles.bubble, isMe ? styles.bubbleMe : styles.bubbleThem]}
-        >
-          <Text style={isMe ? styles.textMe : styles.textThem}>
-            {item.content}
-          </Text>
+      <View style={[styles.msgWrapper, isMe ? styles.msgRight : styles.msgLeft]}>
+        <View style={[styles.bubble, isMe ? styles.bubbleMe : styles.bubbleThem]}>
+          <Text style={isMe ? styles.textMe : styles.textThem}>{item.content}</Text>
           <View style={styles.msgFooter}>
             <Text
               style={[
@@ -339,11 +346,7 @@ export default function PsychiatristDirectChatScreen() {
               })}
             </Text>
             {isMe && item.status === "sending" && (
-              <ActivityIndicator
-                size="small"
-                color="#a7f3d0"
-                style={{ marginLeft: 4 }}
-              />
+              <ActivityIndicator size="small" color="#a7f3d0" style={{ marginLeft: 4 }} />
             )}
             {isMe && item.status === "sent" && (
               <Ionicons name="checkmark-done" size={14} color="#fff" />
@@ -368,7 +371,7 @@ export default function PsychiatristDirectChatScreen() {
     );
   }
 
-  const displayName = peerName || (peerId ? peerId.slice(0, 8) + "…" : "User");
+  const displayName = peerName || "Patient";
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
@@ -404,23 +407,17 @@ export default function PsychiatristDirectChatScreen() {
           <View style={styles.emptyContainer}>
             <Ionicons name="chatbubbles-outline" size={48} color="#d1d5db" />
             <Text style={styles.emptyText}>No messages yet</Text>
-            <Text style={styles.emptySubtext}>
-              Send a message to start chatting
-            </Text>
+            <Text style={styles.emptySubtext}>Send a message to start chatting</Text>
           </View>
         ) : (
           <FlatList
             ref={flatListRef}
             data={messages}
-    keyExtractor={(item) => item.id}
+            keyExtractor={(item) => item.id}
             renderItem={renderMessage}
             contentContainerStyle={styles.chatList}
-            onContentSizeChange={() =>
-              flatListRef.current?.scrollToEnd({ animated: true })
-            }
-            onLayout={() =>
-              flatListRef.current?.scrollToEnd({ animated: false })
-            }
+            onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+            onLayout={() => flatListRef.current?.scrollToEnd({ animated: false })}
           />
         )}
 
@@ -435,10 +432,7 @@ export default function PsychiatristDirectChatScreen() {
             editable={!sending}
           />
           <TouchableOpacity
-            style={[
-              styles.sendBtn,
-              (!draft.trim() || sending) && styles.sendBtnDisabled,
-            ]}
+            style={[styles.sendBtn, (!draft.trim() || sending) && styles.sendBtnDisabled]}
             onPress={sendMessage}
             disabled={!draft.trim() || sending}
           >
@@ -451,64 +445,16 @@ export default function PsychiatristDirectChatScreen() {
         </View>
       </KeyboardAvoidingView>
 
-      {/* Incoming call modal */}
-      <Modal
-        visible={callState === "ringing"}
-        animationType="slide"
-        transparent
-      >
-        <View style={styles.callModalOverlay}>
-          <View style={styles.callModal}>
-            <Text style={styles.callModalTitle}>Incoming Video Call</Text>
-            <Text style={styles.callModalName}>{incomingCaller}</Text>
-            <View style={styles.callActionRow}>
-              <TouchableOpacity
-                style={[styles.callActionBtn, { backgroundColor: "#ef4444" }]}
-                onPress={() => setCallState("idle")}
-              >
-                <MaterialIcons name="call-end" size={28} color="#fff" />
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.callActionBtn, { backgroundColor: "#22c55e" }]}
-                onPress={() => setCallState("incall")}
-              >
-                <MaterialIcons name="call" size={28} color="#fff" />
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      {/* In-call / calling modal */}
-      <Modal
-        visible={callState === "incall" || callState === "calling"}
-        animationType="fade"
-        transparent
-      >
-        <View style={styles.callModalOverlay}>
-          <View style={styles.callModal}>
-            <Text style={styles.callModalTitle}>
-              {callState === "calling" ? "Calling..." : "In Call With"}
-            </Text>
-            <Text style={styles.callModalName}>{displayName}</Text>
-            <View style={styles.videoPlaceholder}>
-              <Feather name="video-off" size={40} color="#9ca3af" />
-              <Text style={{ color: "#9ca3af", marginTop: 10 }}>
-                Video Stream placeholder
-              </Text>
-            </View>
-            <TouchableOpacity
-              style={[
-                styles.callActionBtn,
-                { backgroundColor: "#ef4444", marginTop: 40 },
-              ]}
-              onPress={() => setCallState("idle")}
-            >
-              <MaterialIcons name="call-end" size={28} color="#fff" />
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+      <VideoCallModal
+        callState={callState}
+        peerId={peerId ?? null}
+        peerName={displayName}
+        incomingCaller={incomingCaller}
+        callRoomId={callRoomId}
+        onAccept={acceptCall}
+        onDecline={declineCall}
+        onEnd={endCall}
+      />
     </SafeAreaView>
   );
 }
@@ -541,12 +487,7 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 18, fontWeight: "bold", color: "#111827" },
   headerStatus: { fontSize: 12, color: "#22c55e", marginTop: 2 },
   callBtn: { padding: 10, backgroundColor: "#eff6ff", borderRadius: 20 },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    gap: 8,
-  },
+  emptyContainer: { flex: 1, justifyContent: "center", alignItems: "center", gap: 8 },
   emptyText: { fontSize: 16, color: "#6b7280" },
   emptySubtext: { fontSize: 14, color: "#9ca3af" },
   chatList: { padding: 16, gap: 8, flexGrow: 1 },
@@ -591,40 +532,4 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   sendBtnDisabled: { backgroundColor: "#9ca3af", opacity: 0.5 },
-  callModalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.9)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  callModal: {
-    backgroundColor: "#111827",
-    borderRadius: 20,
-    padding: 30,
-    alignItems: "center",
-    width: "90%",
-  },
-  callModalTitle: { fontSize: 18, color: "#9ca3af", marginBottom: 10 },
-  callModalName: {
-    fontSize: 32,
-    fontWeight: "bold",
-    color: "#fff",
-    marginBottom: 40,
-  },
-  videoPlaceholder: {
-    width: "100%",
-    height: 300,
-    backgroundColor: "#1f2937",
-    borderRadius: 20,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  callActionRow: { flexDirection: "row", gap: 40, marginTop: 40 },
-  callActionBtn: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    justifyContent: "center",
-    alignItems: "center",
-  },
 });

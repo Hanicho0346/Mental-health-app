@@ -1,3 +1,4 @@
+import { shadowStyle } from "@/lib/shadow";
 import { api } from '@/lib/api';
 import { getApiErrorMessage, logClientError } from '@/lib/log';
 import { Feather, Ionicons } from '@expo/vector-icons';
@@ -162,11 +163,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 24,
     padding: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 15,
-    elevation: 2,
+    ...shadowStyle({ color: '#000', offset: { width: 0, height: 2 }, opacity: 0.05, radius: 15, elevation: 2 }),
   },
   inputGroup: { marginBottom: 12 },
   label: { fontSize: 14, fontWeight: '600', color: '#111827', marginBottom: 8 },

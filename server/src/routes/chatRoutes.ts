@@ -1,86 +1,208 @@
+/**
+ * LEGACY chat REST API — secured in Phase B.
+ *
+ * @deprecated Prefer `/api/messages` and Socket.IO for production chat.
+ * These routes remain for `client/lib/chatService.ts` presence helpers only.
+ * See `docs/LEGACY_CHAT.md`.
+ */
 import { Router } from 'express';
-import multer from 'multer';
-import { v2 as cloudinary } from 'cloudinary';
-import fs from 'fs';
+import mongoose from 'mongoose';
+import { randomBytes } from 'node:crypto';
 import { User } from '../models/User.js';
 import { ChatMessage as Message } from '../models/ChatMessage.js';
+import { Conversation } from '../models/Conversation.js';
+import { CallLog } from '../models/CallLog.js';
 import { requireAuth } from '../middleware/authenticate.js';
+import { authRateLimiter } from '../middleware/rateLimit.js';
+import { memoryUpload } from '../modules/uploads/multer.config.js';
+import { uploadBuffer } from '../services/cloudinary.service.js';
+import { logServerError } from '../utils/logger.js';
 
 const router = Router();
-const upload = multer({ dest: 'tmp/' });
-if (!fs.existsSync('tmp')) fs.mkdirSync('tmp');
+const legacyChatLimiter = authRateLimiter();
 
-// Chat login — find or create user, return chat identity
+const VOICE_MIME = new Set([
+  'audio/webm',
+  'audio/ogg',
+  'audio/mpeg',
+  'audio/mp4',
+  'audio/wav',
+  'audio/x-m4a',
+]);
+const MAX_VOICE_BYTES = 10 * 1024 * 1024;
+
+router.use(requireAuth);
+router.use(legacyChatLimiter);
+
+function parseObjectId(value: string): mongoose.Types.ObjectId | null {
+  if (!mongoose.Types.ObjectId.isValid(value)) return null;
+  return new mongoose.Types.ObjectId(value);
+}
+
+async function assertConversationPeers(
+  userId: string,
+  peerId: string
+): Promise<mongoose.Types.ObjectId | null> {
+  const me = parseObjectId(userId);
+  const peer = parseObjectId(peerId);
+  if (!me || !peer) return null;
+
+  const conv = await Conversation.findOne({
+    participants: { $all: [me, peer] },
+  })
+    .select('_id')
+    .lean();
+
+  return conv ? conv._id : null;
+}
+
+/** @deprecated Use authenticated session; returns the caller's chat identity only. */
 router.post('/login', async (req, res) => {
   try {
-    const { username, clerkId, fullName } = req.body as Record<string, string>;
-    if (!username) { res.status(400).json({ error: 'username required' }); return; }
-
-    let user = clerkId ? await User.findOne({ clerk_id: clerkId }) : null;
-    if (!user) user = await User.findOne({ chat_username: username });
-    if (!user && clerkId) {
-      user = await User.create({
-        full_name: fullName || username,
-        email: `${username}@chat.local`,
-        password: clerkId,
-        clerk_id: clerkId,
-        chat_username: username,
-        email_verified: true,
-        role: 'user',
-      });
+    const user = await User.findById(req.userId).select('chat_username full_name').lean();
+    if (!user) {
+      res.status(404).json({ error: 'User not found' });
+      return;
     }
-    if (!user) { res.status(401).json({ error: 'User not found' }); return; }
-    res.json({ userId: user._id, username: user.chat_username || username });
-  } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    const username = user.chat_username?.trim() || user.full_name?.trim() || req.userId!;
+    res.json({ userId: user._id.toString(), username });
+  } catch (err) {
+    logServerError('legacyChat.login', err);
+    res.status(500).json({ error: 'Request failed' });
   }
 });
 
-// Get all chat users
-router.get('/users', async (_req, res) => {
-  const users = await User.find({}, 'chat_username is_online');
-  res.json(users.filter(u => u.chat_username).map(u => ({
-    username: u.chat_username,
-    isOnline: u.is_online,
-  })));
-});
-
-// Get message history between two users
-router.get('/messages/:userA/:userB', async (req, res) => {
-  const { userA, userB } = req.params;
-  const msgs = await Message.find({
-    $or: [
-      { from: userA, to: userB },
-      { from: userB, to: userA },
-    ],
-  }).sort({ timestamp: 1 });
-  res.json(msgs);
-});
-
-// Get call logs between two users
-router.get('/calls/:userA/:userB', async (req, res) => {
-  const { userA, userB } = req.params;
-  const { CallLog } = await import('../models/CallLog.js');
-  const calls = await CallLog.find({
-    $or: [
-      { caller: userA, recipient: userB },
-      { caller: userB, recipient: userA },
-    ],
-  }).sort({ startedAt: 1 });
-  res.json(calls);
-});
-
-// Upload voice message to Cloudinary
-router.post('/upload-voice', upload.single('audio'), async (req, res) => {
+/** Online peers from conversations the authenticated user belongs to. */
+router.get('/users', async (req, res) => {
   try {
-    const result = await cloudinary.uploader.upload((req.file as any).path, {
-      resource_type: 'video',
-      folder: 'voice-messages',
+    const userId = req.userId!;
+    const me = parseObjectId(userId);
+    if (!me) {
+      res.status(400).json({ error: 'Invalid user' });
+      return;
+    }
+
+    const convs = await Conversation.find({ participants: me }).select('participants').lean();
+    const peerIds = new Set<string>();
+    for (const conv of convs) {
+      for (const p of conv.participants) {
+        const id = p.toString();
+        if (id !== userId) peerIds.add(id);
+      }
+    }
+
+    if (peerIds.size === 0) {
+      res.json([]);
+      return;
+    }
+
+    const users = await User.find({ _id: { $in: [...peerIds] } })
+      .select('chat_username full_name is_online')
+      .lean();
+
+    res.json(
+      users.map((u) => ({
+        username: u.chat_username?.trim() || u.full_name?.trim() || u._id.toString(),
+        userId: u._id.toString(),
+        isOnline: u.is_online ?? false,
+      }))
+    );
+  } catch (err) {
+    logServerError('legacyChat.users', err);
+    res.status(500).json({ error: 'Request failed' });
+  }
+});
+
+router.get('/messages/:userA/:userB', async (req, res) => {
+  try {
+    const me = req.userId!;
+    const { userA, userB } = req.params;
+
+    if (me !== userA && me !== userB) {
+      res.status(403).json({ error: 'Access denied' });
+      return;
+    }
+
+    const conversationId = await assertConversationPeers(userA, userB);
+    if (!conversationId) {
+      res.status(403).json({ error: 'Access denied' });
+      return;
+    }
+
+    const msgs = await Message.find({ conversation_id: conversationId })
+      .sort({ timestamp: 1 })
+      .limit(200)
+      .lean();
+
+    res.json(msgs);
+  } catch (err) {
+    logServerError('legacyChat.messages', err);
+    res.status(500).json({ error: 'Request failed' });
+  }
+});
+
+router.get('/calls/:userA/:userB', async (req, res) => {
+  try {
+    const me = req.userId!;
+    const { userA, userB } = req.params;
+
+    if (me !== userA && me !== userB) {
+      res.status(403).json({ error: 'Access denied' });
+      return;
+    }
+
+    const conversationId = await assertConversationPeers(userA, userB);
+    if (!conversationId) {
+      res.status(403).json({ error: 'Access denied' });
+      return;
+    }
+
+    const calls = await CallLog.find({
+      $or: [
+        { caller: userA, recipient: userB },
+        { caller: userB, recipient: userA },
+      ],
+    })
+      .sort({ startedAt: 1 })
+      .limit(100)
+      .lean();
+
+    res.json(calls);
+  } catch (err) {
+    logServerError('legacyChat.calls', err);
+    res.status(500).json({ error: 'Request failed' });
+  }
+});
+
+router.post('/upload-voice', memoryUpload.single('audio'), async (req, res) => {
+  try {
+    const file = req.file;
+    if (!file?.buffer?.length) {
+      res.status(400).json({ error: 'No audio file uploaded' });
+      return;
+    }
+
+    if (file.size > MAX_VOICE_BYTES) {
+      res.status(400).json({ error: 'File too large' });
+      return;
+    }
+
+    const mime = (file.mimetype || '').toLowerCase();
+    if (!VOICE_MIME.has(mime)) {
+      res.status(400).json({ error: 'Invalid audio type' });
+      return;
+    }
+
+    const publicId = `voice_${req.userId}_${randomBytes(8).toString('hex')}`;
+    const { url } = await uploadBuffer(file.buffer, 'voice-messages', {
+      publicId,
+      resourceType: 'video',
     });
-    fs.unlinkSync((req.file as any).path);
-    res.json({ fileUrl: result.secure_url });
-  } catch (e: any) {
-    res.status(500).json({ error: 'Upload failed: ' + e.message });
+
+    res.json({ fileUrl: url });
+  } catch (err) {
+    logServerError('legacyChat.uploadVoice', err);
+    res.status(500).json({ error: 'Upload failed' });
   }
 });
 

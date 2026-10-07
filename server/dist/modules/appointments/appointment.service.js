@@ -11,10 +11,17 @@ const mongoose_1 = __importDefault(require("mongoose"));
 const Appointment_js_1 = require("../../models/Appointment.js");
 const User_js_1 = require("../../models/User.js");
 const AppError_js_1 = require("../../utils/AppError.js");
+const redis_service_js_1 = require("../../integrations/redis/redis.service.js");
+const appointment_notifications_service_js_1 = require("../../services/appointment-notifications.service.js");
+const COUNSELORS_CACHE_KEY = 'cache:counselors';
+const COUNSELORS_CACHE_TTL = 60;
 /**
  * ⚡ SINGLE SOURCE OF TRUTH (DB ONLY)
  */
 async function listPublicCounselors() {
+    const cached = await redis_service_js_1.redisService.getJson(COUNSELORS_CACHE_KEY);
+    if (cached)
+        return cached;
     const counselors = await User_js_1.User.find({
         role: "psychiatrist",
         verification_status: "approved",
@@ -23,7 +30,7 @@ async function listPublicCounselors() {
         .lean()
         .limit(50)
         .exec();
-    return counselors.map((u) => ({
+    const result = counselors.map((u) => ({
         id: u._id.toString(),
         full_name: u.full_name,
         full_name_am: "",
@@ -34,6 +41,8 @@ async function listPublicCounselors() {
         rating: 0,
         reviews: 0,
     }));
+    await redis_service_js_1.redisService.setJsonWithTTL(COUNSELORS_CACHE_KEY, result, COUNSELORS_CACHE_TTL);
+    return result;
 }
 /**
  * ⚡ RESOLVE COUNSELOR (DB ONLY)
@@ -102,5 +111,17 @@ async function createPatientAppointment(patientUserId, input) {
         scheduled_at: scheduledAt,
         time_label: input.time_label.trim(),
     });
+    const patient = await User_js_1.User.findById(patientUserId).select('email full_name').lean();
+    if (patient?.email) {
+        void (0, appointment_notifications_service_js_1.notifyAppointmentCreated)({
+            appointmentId: doc._id.toString(),
+            userId: patientUserId,
+            email: patient.email,
+            fullName: patient.full_name,
+            counselorName: resolved.counselor_name,
+            scheduledAt,
+            timeLabel: input.time_label.trim(),
+        }).catch(() => undefined);
+    }
     return mapAppointment(doc);
 }

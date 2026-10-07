@@ -95,7 +95,44 @@ const userSchema = new mongoose_1.Schema({
         default: 'approved',
     },
     profile_update_feedback: { type: String, default: '' },
-    // ── Wallet ───────────────────────────────────────────────────────────────
+    subscription_tier: {
+        type: String,
+        enum: ['free', 'student', 'premier'],
+        default: 'free',
+    },
+    is_premier: {
+        type: Boolean,
+        default: false,
+    },
+    premier_expires_at: {
+        type: Date,
+        default: null,
+    },
+    ai_chats_daily_limit: {
+        type: Number,
+        default: 5,
+    },
+    ai_chats_used_today: {
+        type: Number,
+        default: 0,
+    },
+    /** Calendar day (YYYY-MM-DD, Africa/Addis_Ababa) for daily AI usage reset */
+    ai_chat_usage_date: {
+        type: String,
+        default: '',
+    },
+    student_id: {
+        type: String,
+        default: '',
+    },
+    student_email: {
+        type: String,
+        default: '',
+    },
+    push_token: {
+        type: String,
+        default: '',
+    },
     wallet_balance: { type: Number, default: 0 },
     wallet_transactions: { type: [walletTransactionRefSchema], default: [] },
     // ── Presence / Chat ──────────────────────────────────────────────────────
@@ -110,7 +147,7 @@ const userSchema = new mongoose_1.Schema({
 // ── Indexes ────────────────────────────────────────────────────────────────────
 // Rule: declare ONCE — either inline OR here, never both.
 // All unique/sparse indexes live here for clarity.
-userSchema.index({ clerk_id: 1 }, { unique: true, sparse: true }); // null allowed for non-Clerk users
+userSchema.index({ clerk_id: 1 }, { unique: true, sparse: true }); // legacy optional field
 userSchema.index({ email: 1 }, { unique: true });
 userSchema.index({ national_id: 1 }, { unique: true, sparse: true }); // null for regular users
 userSchema.index({ medical_license: 1 }, { unique: true, sparse: true }); // null for regular users

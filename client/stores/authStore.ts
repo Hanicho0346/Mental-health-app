@@ -16,29 +16,65 @@ export type AuthUser = {
   is_approved?: boolean;
   admin_feedback?: string;
   hospital_or_clinic?: string;
+  is_premier?: boolean;
+  subscription_tier?: string;
 };
 
 type AuthState = {
   accessToken: string | null;
   refreshToken: string | null;
   user: AuthUser | null;
-  isPremier: boolean;                          // ← NEW
-  setIsPremier: (val: boolean) => void;        // ← NEW
+  isPremier: boolean;
+  setIsPremier: (val: boolean) => void;
   setSession: (p: { accessToken: string; refreshToken: string; user?: AuthUser | null }) => void;
   clearSession: () => Promise<void>;
 };
 
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 
-function scheduleTokenRefresh(token: string) {
-  if (refreshTimer) clearTimeout(refreshTimer);
+function parseJwtPayload(token: string): { exp?: number } | null {
   try {
-    const payload = JSON.parse(atob(token.split('.')[1]));
+    const parts = token.split('.');
+    if (parts.length !== 3 || !parts[1]) return null;
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const pad = base64.length % 4;
+    const padded = pad ? base64 + '='.repeat(4 - pad) : base64;
+    if (typeof atob === 'function') {
+      return JSON.parse(atob(padded));
+    }
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+    let str = '';
+    for (let i = 0; i < padded.length; i += 4) {
+      const enc1 = chars.indexOf(padded.charAt(i));
+      const enc2 = chars.indexOf(padded.charAt(i + 1));
+      const enc3 = chars.indexOf(padded.charAt(i + 2));
+      const enc4 = chars.indexOf(padded.charAt(i + 3));
+      const chr1 = (enc1 << 2) | (enc2 >> 4);
+      const chr2 = ((enc2 & 15) << 4) | (enc3 >> 2);
+      const chr3 = ((enc3 & 3) << 6) | enc4;
+      str += String.fromCharCode(chr1);
+      if (enc3 !== 64) str += String.fromCharCode(chr2);
+      if (enc4 !== 64) str += String.fromCharCode(chr3);
+    }
+    return JSON.parse(str);
+  } catch {
+    return null;
+  }
+}
+
+function scheduleTokenRefresh(token: string) {
+  if (refreshTimer) {
+    clearTimeout(refreshTimer);
+    refreshTimer = null;
+  }
+  try {
+    const payload = parseJwtPayload(token);
+    if (!payload?.exp) return;
     const msUntilExpiry = payload.exp * 1000 - Date.now();
-    const refreshAt = msUntilExpiry - 60_000; // 60s before expiry
-    if (refreshAt > 0) {
+    // Only schedule if expiry is more than 60s in the future; trigger 60s before expiry
+    const refreshAt = msUntilExpiry - 60_000;
+    if (refreshAt > 30_000) {
       refreshTimer = setTimeout(() => {
-        // Call the api.ts refresh directly to avoid circular import
         import('@/lib/api').then(({ refreshAccessToken }) => {
           void refreshAccessToken();
         });
@@ -46,26 +82,41 @@ function scheduleTokenRefresh(token: string) {
     }
   } catch {}
 }
+
 export const useAuthStore = create<AuthState>()(
   persist(
     (set) => ({
       accessToken: null,
       refreshToken: null,
       user: null,
-      isPremier: false,                                      // ← NEW
-      setIsPremier: (val) => set({ isPremier: val }),        // ← NEW
-     setSession: ({ accessToken, refreshToken, user }) => {
-  set((state) => ({
-    accessToken,
-    refreshToken: refreshToken ?? state.refreshToken ?? '',
-    user: user === undefined ? state.user : user,
-  }));
-  if (accessToken) scheduleTokenRefresh(accessToken); // ← add this
-},
-       
+      isPremier: false,
+      setIsPremier: (val) => set({ isPremier: val }),
+      setSession: ({ accessToken, refreshToken, user }) => {
+        set((state) => {
+          const nextUser = user === undefined ? state.user : user;
+          return {
+            accessToken,
+            refreshToken: refreshToken ?? state.refreshToken ?? '',
+            user: nextUser,
+            isPremier: nextUser?.is_premier ?? state.isPremier,
+          };
+        });
+        if (accessToken) {
+          scheduleTokenRefresh(accessToken);
+          void AsyncStorage.multiSet([
+            ['token', accessToken],
+            ['refreshToken', refreshToken ?? ''],
+          ]).catch(() => {});
+        }
+      },
+
       clearSession: async () => {
-        set({ accessToken: null, refreshToken: null, user: null, isPremier: false }); // ← reset on logout
-         await AsyncStorage.multiRemove(['token', 'refreshToken']);
+        if (refreshTimer) {
+          clearTimeout(refreshTimer);
+          refreshTimer = null;
+        }
+        set({ accessToken: null, refreshToken: null, user: null, isPremier: false });
+        await AsyncStorage.multiRemove(['token', 'refreshToken']);
       },
     }),
     {
@@ -75,7 +126,7 @@ export const useAuthStore = create<AuthState>()(
         accessToken: s.accessToken,
         refreshToken: s.refreshToken,
         user: s.user,
-        isPremier: s.isPremier,   // ← persist so tab survives app restarts
+        isPremier: s.isPremier,
       }),
     }
   )
@@ -83,7 +134,7 @@ export const useAuthStore = create<AuthState>()(
 
 export function pickAuthUser(raw: Record<string, unknown>): AuthUser {
   return {
-    id: String(raw.id ?? ''),
+    id: String(raw.id ?? raw._id ?? ''),
     full_name: String(raw.full_name ?? ''),
     email: String(raw.email ?? ''),
     national_id: String(raw.national_id ?? ''),
@@ -100,5 +151,7 @@ export function pickAuthUser(raw: Record<string, unknown>): AuthUser {
     admin_feedback: raw.admin_feedback != null ? String(raw.admin_feedback) : undefined,
     hospital_or_clinic:
       raw.hospital_or_clinic != null ? String(raw.hospital_or_clinic) : undefined,
+    is_premier: typeof raw.is_premier === 'boolean' ? raw.is_premier : undefined,
+    subscription_tier: raw.subscription_tier != null ? String(raw.subscription_tier) : undefined,
   };
 }

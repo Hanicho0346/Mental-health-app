@@ -18,6 +18,16 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 const DEFAULT_AVATAR =
   'https://images.unsplash.com/photo-1612349317150-e413f6a5b16d?w=100&h=100&fit=crop';
 
+function safeAvatarUri(val: unknown): string {
+  if (typeof val === 'string' && val.trim().length > 0) return val.trim();
+  if (val && typeof val === 'object') {
+    const obj = val as Record<string, unknown>;
+    if (typeof obj.uri === 'string' && obj.uri.trim().length > 0) return obj.uri.trim();
+    if (typeof obj.url === 'string' && obj.url.trim().length > 0) return obj.url.trim();
+  }
+  return DEFAULT_AVATAR;
+}
+
 type PatientRow = {
   id: string;
   full_name: string;
@@ -85,7 +95,7 @@ export default function UsersScreen() {
               activeOpacity={0.8}
             >
               <Image
-                source={{ uri: p.avatar_url?.trim() || DEFAULT_AVATAR }}
+                source={{ uri: safeAvatarUri(p.avatar_url) }}
                 style={styles.avatar}
               />
               <View style={{ flex: 1 }}>

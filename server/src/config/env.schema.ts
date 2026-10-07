@@ -59,7 +59,7 @@ const baseEnvSchema = z.object({
     .number()
     .int()
     .positive()
-    .default(900),
+    .default(1800),
 
   JWT_REFRESH_EXPIRES_DAYS: z.coerce
     .number()
@@ -107,10 +107,10 @@ const baseEnvSchema = z.object({
 
   SMTP_PASS: z.string().optional(),
 
-  EMAIL_FROM: z
-    .string()
-    .email()
-    .optional(),
+  EMAIL_FROM: z.preprocess(
+    (v) => (v === '' || v === null ? undefined : v),
+    z.string().email().optional(),
+  ),
 
   CLOUDINARY_CLOUD_NAME:
     z.string().optional(),
@@ -146,10 +146,59 @@ const baseEnvSchema = z.object({
     .positive()
     .default(40),
 
-  CLERK_SECRET_KEY: z
+  OTP_RATE_LIMIT_WINDOW_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(600_000),
+
+  OTP_RATE_LIMIT_MAX: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(5),
+
+  REDIS_URL: z
     .string()
     .min(1)
-    .optional(),
+    .default('redis://127.0.0.1:6379'),
+
+  RESEND_API_KEY: z.string().optional(),
+
+  EMAIL_REPLY_TO: z.preprocess(
+    (v) => (v === '' || v === null ? undefined : v),
+    z.string().email().optional(),
+  ),
+
+  CLIENT_URL: z.string().url().optional(),
+
+  SOCKET_CORS_ORIGINS: z
+    .string()
+    .optional()
+    .transform((s) =>
+      s
+        ?.split(',')
+        .map((x) => x.trim())
+        .filter(Boolean),
+    ),
+
+  SOCKET_MESSAGE_RATE_LIMIT_WINDOW_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(60_000),
+
+  SOCKET_MESSAGE_RATE_LIMIT_MAX: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(60),
+
+  SOCKET_MAX_CONNECTIONS_PER_USER: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(3),
 
   ADMIN_BOOTSTRAP_EMAILS: z
     .string()
@@ -164,10 +213,6 @@ const baseEnvSchema = z.object({
     ),
 
   // ADMIN ENV VARIABLES
-  ADMIN_CLERK_ID: z
-    .string()
-    .optional(),
-
   ADMIN_EMAIL: z
     .string()
     .email()
@@ -230,13 +275,29 @@ export type AppEnv = {
 
   authRateLimitMax: number;
 
-  clerkSecretKey?: string;
+  otpRateLimitWindowMs: number;
+
+  otpRateLimitMax: number;
+
+  redisUrl: string;
+
+  resendApiKey?: string;
+
+  emailReplyTo?: string;
+
+  clientUrl?: string;
+
+  socketCorsOrigins?: string[];
+
+  socketMessageRateLimitWindowMs: number;
+
+  socketMessageRateLimitMax: number;
+
+  socketMaxConnectionsPerUser: number;
 
   adminBootstrapEmails: string[];
 
   // ADMIN TYPES
-  adminClerkId?: string;
-
   adminEmail?: string;
 
   adminName?: string;
@@ -279,6 +340,28 @@ export function parseEnv(
     throw new Error(
       'JWT_REFRESH_SECRET is required in production'
     );
+  }
+
+  if (d.NODE_ENV === 'production') {
+    if (!processEnv.REDIS_URL) {
+      throw new Error('REDIS_URL is required in production');
+    }
+    if (!processEnv.RESEND_API_KEY) {
+      // RESEND_API_KEY is optional — emails will be skipped if not set.
+      // A warning is logged at startup by the email service.
+    }
+    if (!processEnv.EMAIL_FROM) {
+      // EMAIL_FROM is optional when RESEND_API_KEY is not set.
+    }
+    const socketOrigins =
+      processEnv.SOCKET_CORS_ORIGINS?.split(',').map((x) => x.trim()).filter(Boolean) ?? [];
+    const httpOrigins =
+      processEnv.CORS_ORIGINS?.split(',').map((x) => x.trim()).filter(Boolean) ?? [];
+    if (socketOrigins.length === 0 && httpOrigins.length === 0) {
+      throw new Error(
+        'SOCKET_CORS_ORIGINS or CORS_ORIGINS is required in production for browser Socket.IO clients',
+      );
+    }
   }
 
   assertMongoDbUriPath(
@@ -352,17 +435,33 @@ export function parseEnv(
     authRateLimitMax:
       d.AUTH_RATE_LIMIT_MAX,
 
-    clerkSecretKey:
-      d.CLERK_SECRET_KEY,
+    otpRateLimitWindowMs:
+      d.OTP_RATE_LIMIT_WINDOW_MS,
+
+    otpRateLimitMax:
+      d.OTP_RATE_LIMIT_MAX,
+
+    redisUrl: d.REDIS_URL,
+
+    resendApiKey: d.RESEND_API_KEY,
+
+    emailReplyTo: d.EMAIL_REPLY_TO,
+
+    clientUrl: d.CLIENT_URL,
+
+    socketCorsOrigins: d.SOCKET_CORS_ORIGINS,
+
+    socketMessageRateLimitWindowMs: d.SOCKET_MESSAGE_RATE_LIMIT_WINDOW_MS,
+
+    socketMessageRateLimitMax: d.SOCKET_MESSAGE_RATE_LIMIT_MAX,
+
+    socketMaxConnectionsPerUser: d.SOCKET_MAX_CONNECTIONS_PER_USER,
 
     adminBootstrapEmails:
       d.ADMIN_BOOTSTRAP_EMAILS ??
       [],
 
     // ADMIN VALUES
-    adminClerkId:
-      d.ADMIN_CLERK_ID,
-
     adminEmail:
       d.ADMIN_EMAIL,
 

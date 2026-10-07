@@ -247,19 +247,17 @@ class DoctorService {
     apiKey: string;
     folder: string;
   }> {
+    const { cloudName, apiKey, apiSecret } = env.cloudinary;
+    if (!cloudName || !apiKey || !apiSecret) {
+      throw new Error('Cloudinary is not configured on this server');
+    }
     const folder = 'psychiatry_support_videos';
     const timestamp = Math.round(Date.now() / 1000);
     const signature = cloudinary.utils.api_sign_request(
       { timestamp, folder },
-      env.cloudinary.apiSecret!
+      apiSecret
     );
-    return {
-      signature,
-      timestamp,
-      cloudName: env.cloudinary.cloudName!,
-      apiKey: env.cloudinary.apiKey!,
-      folder,
-    };
+    return { signature, timestamp, cloudName, apiKey, folder };
   }
 
   async saveVideoRecord(

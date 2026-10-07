@@ -13,6 +13,7 @@ const User_js_1 = require("../../models/User.js");
 const PsychiatristProfile_js_1 = require("../../models/PsychiatristProfile.js");
 const cloudinary_service_js_1 = require("../../services/cloudinary.service.js");
 const AppError_js_1 = require("../../utils/AppError.js");
+const appointment_notifications_service_js_1 = require("../../services/appointment-notifications.service.js");
 async function getPsychiatristVerificationStatus(userId) {
     const user = await User_js_1.User.findById(userId)
         .select('role verification_status is_approved admin_feedback full_name email specialization medical_license experience_years hospital_or_clinic createdAt wallet_balance wallet_currency is_suspended suspension_reason')
@@ -174,6 +175,13 @@ async function reviewPsychiatrist(adminId, psychiatristUserId, decision, feedbac
             reviewed_at: now,
         },
     }, { upsert: true });
+    void (0, appointment_notifications_service_js_1.notifyPsychiatristReview)({
+        userId: user._id.toString(),
+        email: user.email,
+        fullName: user.full_name,
+        approved: decision === 'approved',
+        feedback: feedbackText || undefined,
+    }).catch(() => undefined);
     return {
         id: user._id.toString(),
         verification_status: decision,

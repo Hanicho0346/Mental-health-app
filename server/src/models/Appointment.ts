@@ -17,6 +17,9 @@ const appointmentSchema = new Schema(
   }
 );
 
+appointmentSchema.index({ psychiatrist_user_id: 1, scheduled_at: 1 });
+appointmentSchema.index({ user_id: 1, scheduled_at: -1 });
+
 export type AppointmentDocument = InferSchemaType<typeof appointmentSchema> & {
   _id: mongoose.Types.ObjectId;
 };

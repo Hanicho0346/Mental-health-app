@@ -1,3 +1,4 @@
+import { shadowStyle } from "@/lib/shadow";
 import { useAuthStore } from "@/stores/authStore";
 import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
@@ -24,6 +25,16 @@ import { getSocket } from "@/lib/socket";
 
 const DEFAULT_AVATAR =
   "https://images.unsplash.com/photo-1612349317150-e413f6a5b16d?w=100&h=100&fit=crop";
+
+function safeAvatarUri(val: unknown): string {
+  if (typeof val === 'string' && val.trim().length > 0) return val.trim();
+  if (val && typeof val === 'object') {
+    const obj = val as Record<string, unknown>;
+    if (typeof obj.uri === 'string' && obj.uri.trim().length > 0) return obj.uri.trim();
+    if (typeof obj.url === 'string' && obj.url.trim().length > 0) return obj.url.trim();
+  }
+  return DEFAULT_AVATAR;
+}
 
 function toStatNumber(value: unknown): number {
   const n = Number(value);
@@ -76,8 +87,8 @@ export default function DashboardScreen() {
   // --- UPLOAD MODAL STATES ---
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadPhase, setUploadPhase] = useState<"uploading" | "saving">("uploading");
+  const [uploadSuccess, setUploadSuccess] = useState(false);
   const [selectedVideo, setSelectedVideo] =
     useState<ImagePicker.ImagePickerAsset | null>(null);
   const [videoForm, setVideoForm] = useState({
@@ -206,36 +217,26 @@ export default function DashboardScreen() {
 
     try {
       setIsUploading(true);
+      setUploadPhase("uploading");
 
       const filename = selectedVideo.uri.split("/").pop() || "video.mp4";
-
       const type = selectedVideo.mimeType || "video/mp4";
-
-      setUploadProgress(0);
-      setUploadPhase("uploading");
 
       await uploadSupportVideo({
         title: videoForm.title,
         amharicTitle: videoForm.amharicTitle,
         tag: videoForm.tag,
         video: { uri: selectedVideo.uri, name: filename, type },
-        onProgress: (p) => {
-          setUploadProgress(p);
-          if (p >= 1) setUploadPhase("saving");
-        },
       });
 
-      Alert.alert("Success", "Video uploaded successfully");
+      setUploadSuccess(true);
 
-      setSelectedVideo(null);
-
-      setVideoForm({
-        title: "",
-        amharicTitle: "",
-        tag: "",
-      });
-
-      setShowUploadModal(false);
+      setTimeout(() => {
+        setUploadSuccess(false);
+        setSelectedVideo(null);
+        setVideoForm({ title: "", amharicTitle: "", tag: "" });
+        setShowUploadModal(false);
+      }, 2000);
     } catch (error) {
       console.error(error);
 
@@ -257,7 +258,6 @@ export default function DashboardScreen() {
       Alert.alert("Upload failed", detail);
     } finally {
       setIsUploading(false);
-      setUploadProgress(0);
       setUploadPhase("uploading");
     }
   };
@@ -271,7 +271,7 @@ export default function DashboardScreen() {
           onPress={() => router.push("/(tabs)/(psychiatrist-tabs)/profile")}
         >
           <Image
-            source={{ uri: user?.avatar_url || DEFAULT_AVATAR }}
+            source={{ uri: safeAvatarUri(user?.avatar_url) }}
             style={styles.doctorAvatar}
           />
           <View>
@@ -416,7 +416,7 @@ export default function DashboardScreen() {
                 <View key={appt.id} style={styles.appointmentCard}>
                   <View style={styles.appointmentTop}>
                     <Image
-                      source={{ uri: appt.avatar || DEFAULT_AVATAR }}
+                      source={{ uri: safeAvatarUri(appt?.avatar) }}
                       style={styles.patientAvatar}
                     />
                     <View style={styles.appointmentInfo}>
@@ -548,23 +548,24 @@ export default function DashboardScreen() {
               />
             </View>
 
-            {isUploading && (
+            {uploadSuccess && (
+              <View style={[styles.uploadStatusBox, { backgroundColor: "#DCFCE7", borderColor: "#4ADE80" }]}>
+                <Feather name="check-circle" size={28} color="#16A34A" />
+                <Text style={[styles.uploadStatusText, { color: "#15803D", fontSize: 15, fontWeight: "700" }]}>
+                  Video uploaded successfully!
+                </Text>
+                <Text style={[styles.uploadStatusText, { color: "#166534" }]}>
+                  ቪዲዮ በተሳካ ሁኔታ ተሰቅሏል
+                </Text>
+              </View>
+            )}
+
+            {isUploading && !uploadSuccess && (
               <View style={styles.uploadStatusBox}>
-                {uploadPhase === "uploading" ? (
-                  <>
-                    <View style={styles.progressBarTrack}>
-                      <View style={[styles.progressBarFill, { width: `${Math.round(uploadProgress * 100)}%` as any }]} />
-                    </View>
-                    <Text style={styles.uploadStatusText}>
-                      Uploading… {Math.round(uploadProgress * 100)}%
-                    </Text>
-                  </>
-                ) : (
-                  <>
-                    <ActivityIndicator size="small" color="#4ADE80" />
-                    <Text style={styles.uploadStatusText}>Saving video…</Text>
-                  </>
-                )}
+                <ActivityIndicator size="small" color="#4ADE80" />
+                <Text style={styles.uploadStatusText}>
+                  {uploadPhase === "uploading" ? "Uploading video…" : "Saving video…"}
+                </Text>
               </View>
             )}
 
@@ -642,11 +643,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
     padding: 16,
     borderRadius: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.03,
-    shadowRadius: 8,
-    elevation: 2,
+    ...shadowStyle({ color: "#000", offset: { width: 0, height: 2 }, opacity: 0.03, radius: 8, elevation: 2 }),
   },
   statIconWrapper: {
     width: 40,
@@ -703,11 +700,7 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 20,
     marginBottom: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.03,
-    shadowRadius: 8,
-    elevation: 2,
+    ...shadowStyle({ color: "#000", offset: { width: 0, height: 2 }, opacity: 0.03, radius: 8, elevation: 2 }),
     borderWidth: 1,
     borderColor: "#F3F4F6",
   },

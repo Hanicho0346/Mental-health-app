@@ -1,25 +1,36 @@
-import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import { Platform } from 'react-native';
 import { api } from './api';
 import { logClientError } from './log';
 
-// How notifications behave when app is in foreground
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-  }),
-});
+type ExpoNotifications = typeof import('expo-notifications');
+
+function configureNotificationHandler(Notifications: ExpoNotifications) {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowBanner: true,
+      shouldShowList: true,
+      shouldPlaySound: true,
+      shouldSetBadge: true,
+    }),
+  });
+}
 
 export async function registerPushToken(): Promise<string | null> {
+  // Web push needs a VAPID key in app config — skip until configured.
+  if (Platform.OS === 'web') {
+    console.log('[push] Skipped — web push not configured');
+    return null;
+  }
+
   // Push tokens only work on physical devices
   if (!Device.isDevice) {
     console.log('[push] Skipped — not a physical device');
     return null;
   }
+
+  const Notifications = await import('expo-notifications');
+  configureNotificationHandler(Notifications);
 
   // Android needs a notification channel
   if (Platform.OS === 'android') {

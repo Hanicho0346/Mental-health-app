@@ -2,10 +2,10 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.adminTransactionsHandler = exports.adminRevenueHandler = exports.adminListBookingsHandler = exports.walletHandler = exports.checkBookingHandler = exports.myPsychiatristsHandler = exports.chapaCallbackHandler = exports.verifyPaymentHandler = exports.initiateBookingHandler = void 0;
 const booking_service_js_1 = require("./booking.service.js");
+const chapaWebhook_js_1 = require("../utils/chapaWebhook.js");
 const BASE_URL = process.env.API_BASE_URL ?? 'http://localhost:4000';
-// Chapa requires a valid HTTP/HTTPS return_url — deep links (exp://) are rejected.
-// After payment, Chapa redirects here; the page can show a "return to app" button.
 const RETURN_URL = process.env.CHAPA_RETURN_URL ?? `${BASE_URL}/payment-return`;
+const WEBHOOK_SECRET = process.env.CHAPA_WEBHOOK_SECRET ?? '';
 // POST /api/bookings/initiate
 const initiateBookingHandler = async (req, res, next) => {
     try {
@@ -34,6 +34,7 @@ const initiateBookingHandler = async (req, res, next) => {
 };
 exports.initiateBookingHandler = initiateBookingHandler;
 // GET /api/bookings/verify/:tx_ref
+// FIX: return booking_id so payment-confirmation.tsx can navigate to the chat
 const verifyPaymentHandler = async (req, res, next) => {
     try {
         const { tx_ref } = req.params;
@@ -42,18 +43,26 @@ const verifyPaymentHandler = async (req, res, next) => {
             return;
         }
         const result = await (0, booking_service_js_1.verifyAndCompleteBooking)(tx_ref);
-        res.json({ success: true, already_paid: result.already_paid, booking: result.booking });
+        res.json({
+            success: true,
+            already_paid: result.already_paid,
+            booking: result.booking,
+            // FIX: expose booking_id at top level — payment-confirmation.tsx reads data.booking_id
+            booking_id: result.booking?._id?.toString() ?? null,
+        });
     }
     catch (err) {
         next(err);
     }
 };
 exports.verifyPaymentHandler = verifyPaymentHandler;
-// Chapa server-to-server webhook (no auth — Chapa calls this)
+// Chapa server-to-server webhook (signature verified when CHAPA_WEBHOOK_SECRET is set)
 const chapaCallbackHandler = async (req, res, next) => {
     try {
+        if (!(0, chapaWebhook_js_1.verifyChapaWebhookSignature)(req, res, WEBHOOK_SECRET))
+            return;
         const tx_ref = req.query['trx_ref'] ?? req.body?.trx_ref ?? req.body?.tx_ref;
-        if (!tx_ref) {
+        if (!tx_ref || typeof tx_ref !== 'string') {
             res.status(400).json({ error: 'trx_ref missing' });
             return;
         }
@@ -95,7 +104,7 @@ const checkBookingHandler = async (req, res, next) => {
     }
 };
 exports.checkBookingHandler = checkBookingHandler;
-// GET /api/bookings/wallet  — user/psychiatrist wallet balance + history
+// GET /api/bookings/wallet
 const walletHandler = async (req, res, next) => {
     try {
         if (!req.userId) {
@@ -110,7 +119,7 @@ const walletHandler = async (req, res, next) => {
     }
 };
 exports.walletHandler = walletHandler;
-// Admin: GET /api/bookings/admin/all
+// Admin routes
 const adminListBookingsHandler = async (req, res, next) => {
     try {
         const { payment_status } = req.query;
@@ -122,7 +131,6 @@ const adminListBookingsHandler = async (req, res, next) => {
     }
 };
 exports.adminListBookingsHandler = adminListBookingsHandler;
-// Admin: GET /api/bookings/admin/revenue
 const adminRevenueHandler = async (req, res, next) => {
     try {
         const summary = await (0, booking_service_js_1.getRevenueSummary)();
@@ -133,7 +141,6 @@ const adminRevenueHandler = async (req, res, next) => {
     }
 };
 exports.adminRevenueHandler = adminRevenueHandler;
-// Admin: GET /api/bookings/admin/transactions
 const adminTransactionsHandler = async (req, res, next) => {
     try {
         const { transaction_type, status } = req.query;

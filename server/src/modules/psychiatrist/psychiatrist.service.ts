@@ -3,6 +3,7 @@ import { User } from '../../models/User.js';
 import { PsychiatristProfile } from '../../models/PsychiatristProfile.js';
 import { uploadBuffer, isCloudinaryConfigured } from '../../services/cloudinary.service.js';
 import { AppError } from '../../utils/AppError.js';
+import { notifyPsychiatristReview } from '../../services/appointment-notifications.service.js';
 
 export async function getPsychiatristVerificationStatus(userId: string) {
   const user = await User.findById(userId)
@@ -227,6 +228,14 @@ export async function reviewPsychiatrist(
     },
     { upsert: true }
   );
+
+  void notifyPsychiatristReview({
+    userId: user._id.toString(),
+    email: user.email,
+    fullName: user.full_name,
+    approved: decision === 'approved',
+    feedback: feedbackText || undefined,
+  }).catch(() => undefined);
 
   return {
     id: user._id.toString(),

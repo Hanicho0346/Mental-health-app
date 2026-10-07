@@ -42,9 +42,10 @@ const conversationSchema = new Schema(
   }
 );
 
-conversationSchema.index({
-  participants: 1,
-});
+conversationSchema.index({ participants: 1 });
+conversationSchema.index({ participants: 1, status: 1 });
+conversationSchema.index({ user_id: 1, status: 1 });
+conversationSchema.index({ psychiatrist_id: 1, status: 1 });
 
 export const Conversation = mongoose.model(
   "Conversation",

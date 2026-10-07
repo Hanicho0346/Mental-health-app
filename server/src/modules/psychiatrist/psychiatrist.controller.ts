@@ -8,11 +8,12 @@ import {
 } from './psychiatrist.service.js';
 import { AppError } from '../../utils/AppError.js';
 import { User } from '../../models/User.js';
+import { logServerError } from '../../utils/logger.js';
 
 export const getVerificationStatus: RequestHandler = async (req, res, next) => {
   try {
     
-    if (!req.userId) {
+    if (!req.userId || !req.userObjectId) {
       res.status(401).json({ error: 'Unauthorized' });
       return;
     }
@@ -35,8 +36,8 @@ export const getFullProfile: RequestHandler = async (req, res, next) => {
       return;
     }
     
-    // Get user data
-    const user = await User.findOne({ clerk_id: req.userId })
+    // Get user data by MongoDB _id (req.userId)
+    const user = await User.findById(req.userId)
       .select('-password')
       .lean();
     
@@ -51,7 +52,6 @@ export const getFullProfile: RequestHandler = async (req, res, next) => {
     // Combine and return full profile
     res.json({
       id: user._id,
-      clerk_id: user.clerk_id,
       email: user.email,
       full_name: user.full_name,
       role: user.role,
@@ -100,12 +100,11 @@ export const uploadDocument: RequestHandler = async (req, res, next) => {
       throw new AppError(400, 'Document file is required');
     }
     
-    // Get document type from validated body
-    const documentType = (req.body.document_type ?? 'other') as
-      | 'license'
-      | 'national_id'
-      | 'certificate'
-      | 'other';
+    // Get document type from body (support both snake_case and camelCase)
+    const rawType = req.body.document_type ?? req.body.documentType ?? 'other';
+    const documentType = (['license', 'national_id', 'certificate', 'other'].includes(rawType)
+      ? rawType
+      : 'other') as 'license' | 'national_id' | 'certificate' | 'other';
     
     const doc = await uploadPsychiatristDocument(req.userId, file, documentType);
     res.status(201).json({ 
@@ -187,7 +186,7 @@ export const getPsychiatristWallet = async (
       currency: 'ETB',
     });
   } catch (err) {
-    console.error('Error in getPsychiatristWallet:', err);
+    logServerError('getPsychiatristWallet', err);
     res.status(500).json({
       error: 'Failed to fetch wallet balance',
     });
@@ -286,7 +285,7 @@ export const getPsychiatristTransactions = async (
       },
     });
   } catch (err) {
-    console.error('Error in getPsychiatristTransactions:', err);
+    logServerError('getPsychiatristTransactions', err);
     res.status(500).json({
       error: 'Failed to fetch transaction history',
     });
@@ -302,18 +301,16 @@ export const getPsychiatristStats = async (
   res: Response
 ): Promise<void> => {
   try {
-    const clerkId = req.userId;
+    const userId = req.userId;
 
-    if (!clerkId) {
+    if (!userId) {
       res.status(401).json({
         error: 'Unauthorized',
       });
       return;
     }
 
-    const user = await User.findOne({
-      clerk_id: clerkId,
-    });
+    const user = await User.findById(userId);
 
     if (!user) {
       res.status(404).json({
@@ -372,7 +369,7 @@ export const getPsychiatristStats = async (
       },
     });
   } catch (err) {
-    console.error('Error in getPsychiatristStats:', err);
+    logServerError('getPsychiatristStats', err);
     res.status(500).json({
       error: 'Failed to fetch statistics',
     });

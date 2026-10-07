@@ -17,6 +17,16 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 const DEFAULT_AVATAR =
   'https://images.unsplash.com/photo-1612349317150-e413f6a5b16d?w=100&h=100&fit=crop';
 
+function safeAvatarUri(val: unknown): string {
+  if (typeof val === 'string' && val.trim().length > 0) return val.trim();
+  if (val && typeof val === 'object') {
+    const obj = val as Record<string, unknown>;
+    if (typeof obj.uri === 'string' && obj.uri.trim().length > 0) return obj.uri.trim();
+    if (typeof obj.url === 'string' && obj.url.trim().length > 0) return obj.url.trim();
+  }
+  return DEFAULT_AVATAR;
+}
+
 type PatientProfile = {
   id: string;
   full_name: string;
@@ -82,7 +92,7 @@ export default function PatientProfileScreen() {
         <ScrollView contentContainerStyle={{ paddingHorizontal: pad, paddingBottom: 32 }}>
           <View style={styles.hero}>
             <Image
-              source={{ uri: profile.avatar_url?.trim() || DEFAULT_AVATAR }}
+              source={{ uri: safeAvatarUri(profile.avatar_url) }}
               style={styles.heroAvatar}
             />
             <Text style={styles.heroName}>{profile.full_name}</Text>

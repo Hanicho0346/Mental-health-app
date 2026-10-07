@@ -1,13 +1,13 @@
+import { shadowStyle } from "@/lib/shadow";
 import { api } from "@/lib/api";
 import { getApiErrorMessage, logClientError } from "@/lib/log";
 import { isPsychiatrist } from "@/lib/tabNavigation";
 import { useAuthStore } from "@/stores/authStore";
-import { useChatStore } from "@/stores/chatStore";
-import { connectSocket } from "@/lib/chatService";
 import { Feather, Ionicons } from "@expo/vector-icons";
+import { useEventListener } from "expo";
+import { useVideoPlayer, VideoView } from "expo-video";
 import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useState } from "react";
-import { Video, ResizeMode } from "expo-av";
 import {
   ActivityIndicator,
   Image,
@@ -99,6 +99,57 @@ function formatAppointmentTime(iso: string): string {
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
+function getVideoUri(video: SupportVideo): string {
+  if (typeof video.video_url === "string") {
+    return video.video_url;
+  }
+  if (typeof (video.video_url as any)?.uri === "string") {
+    return (video.video_url as any).uri;
+  }
+  if (typeof (video.video_url as any)?.url === "string") {
+    return (video.video_url as any).url;
+  }
+  return "";
+}
+
+function SupportVideoPlayer({
+  video,
+  onPlaybackError,
+}: {
+  video: SupportVideo;
+  onPlaybackError: (error: unknown) => void;
+}) {
+  const uri = getVideoUri(video);
+  const player = useVideoPlayer(uri ? { uri } : null, (player) => {
+    if (uri) {
+      player.play();
+    }
+  });
+
+  useEventListener(player, "statusChange", ({ status, error }) => {
+    if (status === "error") {
+      onPlaybackError(error);
+    }
+  });
+
+  if (!uri) {
+    return (
+      <View style={styles.videoPlayerFallback}>
+        <Text style={styles.videoPlayerFallbackText}>Video unavailable</Text>
+      </View>
+    );
+  }
+
+  return (
+    <VideoView
+      player={player}
+      style={styles.videoPlayer}
+      nativeControls
+      contentFit="contain"
+    />
+  );
+}
+
 export default function HomeScreen() {
   const psychiatrist = isPsychiatrist(useAuthStore((s) => s.user));
 
@@ -129,19 +180,6 @@ export default function HomeScreen() {
             setMe(data);
             setIsPremier(data.is_premier ?? false);
             setFeeling(feelingFromMoodStatus(data.mood_status));
-            try {
-              const username = data.full_name?.trim() || data.id;
-              useChatStore.getState().setMe({
-                _id: data.id,
-                userId: data.id,
-                username: data.full_name,
-                full_name: data.full_name,
-              });
-              const token = useAuthStore.getState().accessToken ?? undefined;
-              connectSocket(username, token);
-            } catch (e) {
-              console.warn("chat init failed", e);
-            }
           }
         } catch (e) {
           logClientError("home.loadProfile", e);
@@ -251,10 +289,13 @@ export default function HomeScreen() {
   const renderVideoCard = (video: SupportVideo, isStandalone = false) => {
     const isFav = !!video.isFavorite;
 
+    const rawUrl = typeof video?.video_url === 'string' ? video.video_url : typeof (video?.video_url as any)?.url === 'string' ? (video.video_url as any).url : '';
     // Auto-generate thumbnail from Cloudinary video URL
-    const thumbnailUri = video.video_url
-      .replace("/video/upload/", "/video/upload/so_0,w_400,h_225,c_fill/")
-      .replace(/\.(mp4|mov|avi|mkv)$/, ".jpg");
+    const thumbnailUri = rawUrl
+      ? rawUrl
+          .replace("/video/upload/", "/video/upload/so_0,w_400,h_225,c_fill/")
+          .replace(/\.(mp4|mov|avi|mkv)$/, ".jpg")
+      : "";
 
     return (
       <View
@@ -847,13 +888,10 @@ export default function HomeScreen() {
 
           {/* Player */}
           {playingVideo && (
-            <Video
-              source={{ uri: playingVideo.video_url }}
-              style={{ width: "100%", aspectRatio: 16 / 9 }}
-              useNativeControls
-              resizeMode={ResizeMode.CONTAIN}
-              shouldPlay
-              onError={(error) => {
+            <SupportVideoPlayer
+              key={playingVideo.id}
+              video={playingVideo}
+              onPlaybackError={(error) => {
                 console.warn("Video error", error);
                 Alert.alert("Playback Error", "Could not play this video.");
                 setPlayingVideo(null);
@@ -949,11 +987,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 20,
     marginBottom: 24,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
-    elevation: 2,
+    ...shadowStyle({ color: "#000", offset: { width: 0, height: 2 }, opacity: 0.05, radius: 10, elevation: 2 }),
   },
   rowBetween: {
     flexDirection: "row",
@@ -1037,11 +1071,7 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 20,
     marginHorizontal: 4,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
-    elevation: 2,
+    ...shadowStyle({ color: "#000", offset: { width: 0, height: 2 }, opacity: 0.05, radius: 10, elevation: 2 }),
   },
   actionIconWrap: {
     width: 40,
@@ -1065,11 +1095,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     borderWidth: 1,
     borderColor: "#BBF7D0",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    elevation: 2,
+    ...shadowStyle({ color: "#000", offset: { width: 0, height: 2 }, opacity: 0.04, radius: 8, elevation: 2 }),
   },
   aiChatLeft: { flexDirection: "row", alignItems: "center", flex: 1, gap: 12 },
   aiChatAvatarWrap: { position: "relative" },
@@ -1198,11 +1224,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: "#E5E7EB",
     gap: 12,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 2,
+    ...shadowStyle({ color: "#000", offset: { width: 0, height: 1 }, opacity: 0.04, radius: 4, elevation: 2 }),
     overflow: "hidden",
   },
   logoContainer: {
@@ -1362,12 +1384,17 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
     borderRadius: 20,
     overflow: "hidden",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
-    elevation: 2,
+    ...shadowStyle({ color: "#000", offset: { width: 0, height: 2 }, opacity: 0.05, radius: 10, elevation: 2 }),
   },
+  videoPlayer: { width: "100%", aspectRatio: 16 / 9 },
+  videoPlayerFallback: {
+    width: "100%",
+    aspectRatio: 16 / 9,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#111827",
+  },
+  videoPlayerFallbackText: { color: "#9CA3AF", fontWeight: "700" },
   videoImage: { width: "100%", height: 160, backgroundColor: "#F3F4F6" },
   playButtonOverlay: { position: "absolute", top: 56, alignSelf: "center" },
   videoTag: {

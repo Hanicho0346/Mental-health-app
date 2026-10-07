@@ -6,12 +6,12 @@ import { env } from '../../config/env.js';
 import { RefreshSession } from '../../models/RefreshSession.js';
 import { User, computeIsApproved } from '../../models/User.js';
 import { PsychiatristProfile } from '../../models/PsychiatristProfile.js';
-import { sendMail, sendVerificationCodeToRegisteredEmail } from '../../services/email.service.js';
+import { sendVerificationCodeToRegisteredEmail, queuePasswordResetEmail } from '../../services/email.service.js';
 import { signAccessToken } from '../../utils/jwt.js';
 import { AppError } from '../../utils/AppError.js';
 import { generateNumericOtp, hashOtp, verifyOtpHash } from '../../utils/otp.js';
 import { hashRefreshToken } from '../../utils/tokenHash.js';
-import { logServerError } from '../../utils/logger.js';
+import { logServerError, logServerInfo } from '../../utils/logger.js';
 import type { UserRole } from '../../types/roles.js';
 import { uploadBuffer } from '../../services/cloudinary.service.js';
 const SALT_ROUNDS = 12;
@@ -42,9 +42,16 @@ export function publicUser(user: {
   is_approved?: boolean;
   admin_feedback?: string | null;
   hospital_or_clinic?: string | null;
+  is_premier?: boolean;
+  premier_expires_at?: Date | null;
+  subscription_tier?: string;
 }) {
   const role = pickRole(user.role);
   const verification_status = user.verification_status ?? null;
+  const rawExpiry = user.premier_expires_at ?? null;
+  const isExpired = rawExpiry !== null && new Date(rawExpiry) < new Date();
+  const isPremier = (user.is_premier === true) && !isExpired;
+
   return {
     id: user._id.toString(),
     full_name: user.full_name,
@@ -62,6 +69,8 @@ export function publicUser(user: {
       (role === 'psychiatrist' ? verification_status === 'approved' : true),
     admin_feedback: user.admin_feedback ?? '',
     hospital_or_clinic: user.hospital_or_clinic ?? '',
+    is_premier: isPremier,
+    subscription_tier: user.subscription_tier ?? 'free',
   };
 }
 
@@ -163,8 +172,8 @@ async function issueEmailVerificationOtp(
     { _id: userId },
     { $set: { email_verification_otp_hash: hash, email_verification_otp_expires_at: exp } }
   );
-  console.log(`[OTP] Verification code for ${registeredEmail}: ${code}`);
-  await sendVerificationCodeToRegisteredEmail(registeredEmail, code);
+  logServerInfo('auth: verification OTP generated', { userId: userId.toString() });
+  await sendVerificationCodeToRegisteredEmail(userId.toString(), registeredEmail, code);
 }
 
 export async function registerWithPassword(
@@ -276,9 +285,16 @@ export async function loginWithPassword(input: { email: string; password: string
   if (!user?.password || !(await bcrypt.compare(input.password, user.password))) {
     throw new AppError(401, 'Invalid email or password');
   }
+  if (user.account_status === 'suspended') {
+    throw new AppError(403, 'Your account has been suspended. Please contact support.');
+  }
+  if (user.account_status === 'deleted') {
+    throw new AppError(403, 'This account has been deleted.');
+  }
   if ((env.emailVerificationEnabled || env.blockUnverifiedLogin) && !user.email_verified) {
     throw new AppError(403, 'Email not verified');
   }
+  await User.updateOne({ _id: user._id }, { $set: { last_login_at: new Date() } });
   return issueAuthResponse(user._id.toString(), req);
 }
 
@@ -346,47 +362,37 @@ export async function forgotPasswordRequest(input: { email: string }): Promise<{
     { _id: user._id },
     { $set: { password_reset_otp_hash: hash, password_reset_otp_expires_at: exp } }
   );
-  await sendMail({
-    to: user.email,
-    subject: 'Password reset',
-    text: `Your password reset code is: ${code}. It expires in one hour.`,
-  });
+  await queuePasswordResetEmail(user._id.toString(), user.email, code);
   return { ok: true };
 }
 
 
 
 export async function uploadDocument(input: {
-  email: string;
+  userId?: string;
   fileBuffer: Buffer;
   mimeType: string;
 }): Promise<{ ok: boolean; url: string }> {
-  const safeEmail = input.email.trim().toLowerCase().replace(/[^a-z0-9]/g, '_');
+  const publicId = input.userId
+    ? `cert_${input.userId}`
+    : `cert_pending_${randomBytes(16).toString('hex')}`;
 
   const { url, public_id } = await uploadBuffer(
     input.fileBuffer,
     'psychiatrist_certificates',
     {
-      publicId: `cert_pending_${safeEmail}`,
+      publicId,
       resourceType: input.mimeType === 'application/pdf' ? 'raw' : 'image',
     },
   );
 
-  // If user already exists (re-upload case), save immediately
-  const existing = await User.findOne({
-    email: input.email.trim().toLowerCase(),
-  }).exec();
-
-  if (existing) {
-    // Remove any previous certificate doc, then push the new one
+  if (input.userId) {
     await User.updateOne(
-      { _id: existing._id },
-      {
-        $pull: { uploaded_documents: { kind: 'psychiatrist_doc' } },
-      },
+      { _id: input.userId },
+      { $pull: { uploaded_documents: { kind: 'psychiatrist_doc' } } },
     );
     await User.updateOne(
-      { _id: existing._id },
+      { _id: input.userId },
       {
         $push: {
           uploaded_documents: {

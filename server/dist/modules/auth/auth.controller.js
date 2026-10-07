@@ -33,9 +33,11 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.resetPassword = exports.forgotPassword = exports.resendVerification = exports.verifyEmail = exports.logout = exports.refresh = exports.login = exports.register = void 0;
-const AppError_js_1 = require("../../utils/AppError.js");
+exports.uploadCertificate = exports.updatePushToken = exports.resetPassword = exports.forgotPassword = exports.resendVerification = exports.verifyEmail = exports.logout = exports.refresh = exports.login = exports.register = void 0;
 const authService = __importStar(require("./auth.service.js"));
+const User_js_1 = require("../../models/User.js");
+const AppError_js_1 = require("../../utils/AppError.js");
+const logger_js_1 = require("../../utils/logger.js");
 function isDuplicateKeyError(err) {
     return typeof err === 'object' && err !== null && err.code === 11000;
 }
@@ -177,3 +179,56 @@ const resetPassword = async (req, res) => {
     }
 };
 exports.resetPassword = resetPassword;
+const updatePushToken = async (req, res, next) => {
+    try {
+        if (!req.userId) {
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
+        }
+        const { push_token } = req.body;
+        if (!push_token?.trim()) {
+            res.status(400).json({ error: 'push_token is required' });
+            return;
+        }
+        await User_js_1.User.findByIdAndUpdate(req.userId, { push_token: push_token.trim() });
+        res.json({ ok: true });
+    }
+    catch (err) {
+        next(err);
+    }
+};
+exports.updatePushToken = updatePushToken;
+const CERT_MIME = new Set(['application/pdf', 'image/jpeg', 'image/png', 'image/jpg']);
+const MAX_CERT_BYTES = 10 * 1024 * 1024;
+const uploadCertificate = async (req, res) => {
+    try {
+        const file = req.file;
+        if (!file) {
+            res.status(400).json({ error: 'No file uploaded. Send field name: "file"' });
+            return;
+        }
+        if (!file.buffer || file.buffer.length === 0) {
+            res.status(500).json({ error: 'Server misconfiguration: file buffer unavailable' });
+            return;
+        }
+        if (!CERT_MIME.has(file.mimetype)) {
+            res.status(400).json({ error: 'Only PDF, JPG, and PNG are allowed' });
+            return;
+        }
+        if (file.size > MAX_CERT_BYTES) {
+            res.status(400).json({ error: 'File too large. Maximum 10 MB' });
+            return;
+        }
+        const result = await authService.uploadDocument({
+            userId: req.userId,
+            fileBuffer: file.buffer,
+            mimeType: file.mimetype,
+        });
+        res.status(200).json(result);
+    }
+    catch (err) {
+        (0, logger_js_1.logServerError)('auth.uploadCertificate', err);
+        handleAuthError(res, err, 'Certificate upload');
+    }
+};
+exports.uploadCertificate = uploadCertificate;

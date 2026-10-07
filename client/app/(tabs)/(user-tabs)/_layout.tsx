@@ -1,5 +1,3 @@
-// app/(tabs)/(user-tabs)/_layout.tsx
-
 import { HapticTab } from "@/components/haptic-tab";
 import { isAdmin } from "@/lib/authGuards";
 import { api } from "@/lib/api";
@@ -7,24 +5,22 @@ import { useAuthStore } from "@/stores/authStore";
 import { useChatStore } from "@/stores/chatStore";
 import { getStoredAuthToken } from "@/lib/auth";
 import { connectSocket } from "@/lib/chatService";
-import { Feather } from "@expo/vector-icons";
+import { Feather, MaterialIcons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Redirect, Tabs } from "expo-router";
+import { Redirect, Tabs, router } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { AppState, AppStateStatus, ActivityIndicator, Platform, useWindowDimensions, View } from "react-native";
+import { AppState, AppStateStatus, ActivityIndicator, Modal, Platform, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useAuth } from "@clerk/clerk-expo";
+import { getSocket } from "@/lib/socket";
 
 export default function UserTabLayout() {
   const [ready, setReady] = useState(false);
-  const { getToken } = useAuth();
   const accessToken = useAuthStore((s) => s.accessToken);
   const user = useAuthStore((s) => s.user);
-  const isPremier = useAuthStore((s) => s.isPremier); // ← read from store
+  const isPremier = useAuthStore((s) => s.isPremier);
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const appStateRef = useRef(AppState.currentState);
-  const setIsPremier = useAuthStore((s) => s.setIsPremier);
 
   const compact = width < 380;
   const iconSize = compact ? 22 : 24;
@@ -33,9 +29,7 @@ export default function UserTabLayout() {
     if (!user) return;
     const setupSocket = async () => {
       const username = user.full_name?.trim() || user.id;
-      const token =
-        (await getStoredAuthToken()) ??
-        (await getToken({ template: "backend" }));
+      const token = await getStoredAuthToken();
       useChatStore.getState().setMe({
         _id: user.id,
         userId: user.id,
@@ -45,7 +39,7 @@ export default function UserTabLayout() {
       if (token) connectSocket(username, token);
     };
     void setupSocket();
-  }, [user, getToken]);
+  }, [user]);
 
   useEffect(() => {
     const handleAppStateChange = async (nextState: AppStateStatus) => {
@@ -141,7 +135,9 @@ export default function UserTabLayout() {
     return <Redirect href="/(tabs)/(psychiatrist-tabs)/dashboard" />;
 
   return (
-    <Tabs screenOptions={screenOptions}>
+    <>
+      <GlobalIncomingCallOverlay />
+      <Tabs screenOptions={screenOptions}>
       <Tabs.Screen
         name="home"
         options={{
@@ -164,7 +160,6 @@ export default function UserTabLayout() {
         }}
       />
 
-      {/* AI Chat — visible only for premier users */}
       <Tabs.Screen
         name="aichat"
         options={
@@ -206,10 +201,139 @@ export default function UserTabLayout() {
       <Tabs.Screen
         name="notifications"
         options={{
-          href: null, // keep hidden per your original setup
+          href: null,
           tabBarIcon: ({ color }) => <Feather size={iconSize} name="bell" color={color} />,
         }}
       />
     </Tabs>
+    </>
   );
 }
+
+// ── Global incoming-call overlay ──────────────────────────────────────────────
+// Listens for incoming-call on the socket regardless of which screen is active.
+// When the user accepts, it navigates to the correct chat screen.
+function GlobalIncomingCallOverlay() {
+  const [visible, setVisible] = useState(false);
+  const [callerName, setCallerName] = useState<string>("");
+  const callerIdRef  = useRef<string | null>(null);
+  const roomIdRef    = useRef<string | null>(null);
+  const timerRef     = useRef<NodeJS.Timeout | null>(null);
+  const conversations = useChatStore((s) => s.conversations);
+
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket) return;
+
+    const onIncomingCall = ({ from, roomId }: { from: string; roomId: string }) => {
+      callerIdRef.current = from;
+      roomIdRef.current   = roomId;
+
+      // Resolve name from conversations store
+      const match = conversations.find((c: any) => c.peerId === from);
+      setCallerName(match?.peerName ? `Dr. ${match.peerName}` : "Psychiatrist");
+
+      setVisible(true);
+
+      // Auto-dismiss after 45 s if not answered
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => {
+        setVisible(false);
+        callerIdRef.current = null;
+        roomIdRef.current   = null;
+      }, 45_000);
+    };
+
+    const onCallEnded    = () => dismiss();
+    const onCallDeclined = () => dismiss();
+
+    socket.on("incoming-call",  onIncomingCall);
+    socket.on("call-ended",     onCallEnded);
+    socket.on("call-declined",  onCallDeclined);
+
+    return () => {
+      socket.off("incoming-call",  onIncomingCall);
+      socket.off("call-ended",     onCallEnded);
+      socket.off("call-declined",  onCallDeclined);
+    };
+  }, []);
+
+  const dismiss = () => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    setVisible(false);
+    callerIdRef.current = null;
+    roomIdRef.current   = null;
+  };
+
+  const handleDecline = () => {
+    const socket = getSocket();
+    if (socket && callerIdRef.current) {
+      socket.emit("call-declined", { to: callerIdRef.current });
+    }
+    dismiss();
+  };
+
+  const handleAccept = () => {
+    const callerId = callerIdRef.current;
+    const roomId   = roomIdRef.current;
+    if (!callerId || !roomId) return;
+
+    const socket = getSocket();
+    if (socket) {
+      socket.emit("call-accepted", { to: callerId, roomId });
+    }
+
+    dismiss();
+    // Navigate to the chat screen with this psychiatrist — it will pick up
+    // the incall state via the call-accepted event already emitted above.
+    router.push(`/(tabs)/(user-tabs)/chats/${callerId}` as any);
+  };
+
+  if (!visible) return null;
+
+  return (
+    <Modal visible animationType="slide" transparent statusBarTranslucent>
+      <View style={gs.overlay}>
+        <View style={gs.card}>
+          <Text style={gs.label}>Incoming Video Call</Text>
+          <Text style={gs.name}>{callerName || "Psychiatrist"}</Text>
+          <View style={gs.row}>
+            <TouchableOpacity
+              style={[gs.btn, { backgroundColor: "#ef4444" }]}
+              onPress={handleDecline}
+            >
+              <MaterialIcons name="call-end" size={28} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[gs.btn, { backgroundColor: "#22c55e" }]}
+              onPress={handleAccept}
+            >
+              <MaterialIcons name="videocam" size={28} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const gs = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.85)",
+    justifyContent: "flex-end",
+    paddingBottom: 40,
+    alignItems: "center",
+  },
+  card: {
+    backgroundColor: "#111827",
+    borderRadius: 24,
+    padding: 32,
+    alignItems: "center",
+    width: "90%",
+  },
+  label: { fontSize: 14, color: "#9ca3af", marginBottom: 8 },
+  name:  { fontSize: 26, fontWeight: "bold", color: "#fff", marginBottom: 32 },
+  row:   { flexDirection: "row", gap: 48 },
+  btn:   { width: 68, height: 68, borderRadius: 34, justifyContent: "center", alignItems: "center" },
+});

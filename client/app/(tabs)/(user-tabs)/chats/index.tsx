@@ -195,12 +195,21 @@ function Header({ connected }: { connected: boolean }) {
   return (
     <View style={styles.header}>
       <Text style={styles.headerTitle}>Chats</Text>
-      <View
-        style={[
-          styles.connectionDot,
-          connected ? styles.dotOnline : styles.dotOffline,
-        ]}
-      />
+      <View style={styles.headerActions}>
+        <TouchableOpacity
+          style={styles.groupLink}
+          onPress={() => router.push("/groupchats" as never)}
+        >
+          <Feather name="users" size={20} color="#2563eb" />
+          <Text style={styles.groupLinkText}>Groups</Text>
+        </TouchableOpacity>
+        <View
+          style={[
+            styles.connectionDot,
+            connected ? styles.dotOnline : styles.dotOffline,
+          ]}
+        />
+      </View>
     </View>
   );
 }
@@ -217,6 +226,17 @@ const styles = StyleSheet.create({
     borderBottomColor: "#f3f4f6",
   },
   headerTitle: { flex: 1, fontSize: 24, fontWeight: "bold", color: "#111827" },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: 12 },
+  groupLink: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#eff6ff",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  groupLinkText: { fontSize: 13, fontWeight: "600", color: "#2563eb" },
   connectionDot: { width: 10, height: 10, borderRadius: 5 },
   dotOnline: { backgroundColor: "#22c55e" },
   dotOffline: { backgroundColor: "#ef4444" },

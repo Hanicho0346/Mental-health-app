@@ -36,6 +36,12 @@ export async function initiatePremierSubscription(params: {
     });
   }
 
+  // Append tx_ref via simple string manipulation — supports both http:// and
+  // custom deep-link schemes (e.g. mental-health-mobile://) without relying on
+  // node's URL constructor which only accepts http/https.
+  const sep = params.returnUrl.includes('?') ? '&' : '?';
+  const returnUrlFormatted = `${params.returnUrl}${sep}tx_ref=${encodeURIComponent(tx_ref)}`;
+
   const payment = await initiateChapaPayment({
     tx_ref,
     amount: PREMIER_PRICE,
@@ -43,7 +49,7 @@ export async function initiatePremierSubscription(params: {
     first_name: params.firstName,
     last_name: params.lastName,
     callback_url: params.callbackUrl,
-    return_url: `${params.returnUrl}?tx_ref=${tx_ref}`,
+    return_url: returnUrlFormatted,
     description: 'Tesfa Premier Subscription',
   });
 

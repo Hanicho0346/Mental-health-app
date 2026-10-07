@@ -26,7 +26,6 @@ import WalletSection from "@/components/psychiatrist/wallet";
 import DocumentsSection from "@/components/psychiatrist/documents";
 import { clearAuthToken } from "@/lib/auth";
 import { getApiErrorMessage, logClientError } from "@/lib/log";
-import { useClerk } from "@clerk/clerk-expo";
 import { router } from "expo-router";
 
 // ─── Tab types ────────────────────────────────────────────────────────────────
@@ -57,10 +56,8 @@ useFocusEffect(
     reload();
   }, [reload])  // reload is now stable, so this never re-triggers
 );
-  const { signOut } = useClerk();
   async function logout() {
     try {
-      await signOut();
       await clearAuthToken();
       router.replace("/login");
     } catch (e) {

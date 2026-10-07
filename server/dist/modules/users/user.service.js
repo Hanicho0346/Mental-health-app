@@ -14,6 +14,10 @@ async function getMeProfile(userId) {
     if (!user) {
         throw new AppError_js_1.AppError(404, 'User not found');
     }
+    // Derive live premier status: flag must be true AND not expired
+    const rawExpiry = user.premier_expires_at ?? null;
+    const isExpired = rawExpiry !== null && new Date(rawExpiry) < new Date();
+    const isPremier = (user.is_premier === true) && !isExpired;
     return {
         id: user._id.toString(),
         full_name: user.full_name,
@@ -29,6 +33,11 @@ async function getMeProfile(userId) {
             (user.role === 'psychiatrist' ? user.verification_status === 'approved' : true),
         admin_feedback: user.admin_feedback ?? '',
         hospital_or_clinic: user.hospital_or_clinic ?? '',
+        // ── Premier fields ──
+        is_premier: isPremier,
+        premier_expires_at: rawExpiry ? rawExpiry.toISOString() : null,
+        subscription_tier: user.subscription_tier ?? 'free',
+        ai_chats_daily_limit: user.ai_chats_daily_limit ?? null,
     };
 }
 async function getPeerPublicProfile(peerId, requestUserId) {
@@ -65,6 +74,9 @@ async function patchMeProfile(userId, body) {
     if (!user) {
         throw new AppError_js_1.AppError(404, 'User not found');
     }
+    const rawExpiry = user.premier_expires_at ?? null;
+    const isExpired = rawExpiry !== null && new Date(rawExpiry) < new Date();
+    const isPremier = (user.is_premier === true) && !isExpired;
     return {
         id: user._id.toString(),
         full_name: user.full_name,
@@ -80,5 +92,10 @@ async function patchMeProfile(userId, body) {
             (user.role === 'psychiatrist' ? user.verification_status === 'approved' : true),
         admin_feedback: user.admin_feedback ?? '',
         hospital_or_clinic: user.hospital_or_clinic ?? '',
+        // ── Premier fields ──
+        is_premier: isPremier,
+        premier_expires_at: rawExpiry ? rawExpiry.toISOString() : null,
+        subscription_tier: user.subscription_tier ?? 'free',
+        ai_chats_daily_limit: user.ai_chats_daily_limit ?? null,
     };
 }

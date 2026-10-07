@@ -1,3 +1,4 @@
+import { shadowStyle } from "@/lib/shadow";
 import { api } from "@/lib/api";
 import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
@@ -19,6 +20,16 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 const DEFAULT_AVATAR =
   "https://images.unsplash.com/photo-1612349317150-e413f6a5b16d?w=100&h=100&fit=crop";
+
+function safeAvatarUri(val: unknown): string {
+  if (typeof val === 'string' && val.trim().length > 0) return val.trim();
+  if (val && typeof val === 'object') {
+    const obj = val as Record<string, unknown>;
+    if (typeof obj.uri === 'string' && obj.uri.trim().length > 0) return obj.uri.trim();
+    if (typeof obj.url === 'string' && obj.url.trim().length > 0) return obj.url.trim();
+  }
+  return DEFAULT_AVATAR;
+}
 
 // Helper to generate the next 30 days for the calendar strip
 const generateDateRange = () => {
@@ -168,7 +179,7 @@ const hasFetched = useRef(false);
             <View style={styles.appointmentCard}>
               <View style={styles.appointmentTop}>
                 <Image
-                  source={{ uri: appt.avatar || DEFAULT_AVATAR }}
+                  source={{ uri: safeAvatarUri(appt?.avatar) }}
                   style={styles.patientAvatar}
                 />
                 <View style={styles.appointmentInfo}>
@@ -314,11 +325,7 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 20,
     marginBottom: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.03,
-    shadowRadius: 8,
-    elevation: 2,
+    ...shadowStyle({ color: "#000", offset: { width: 0, height: 2 }, opacity: 0.03, radius: 8, elevation: 2 }),
     borderWidth: 1,
     borderColor: "#F3F4F6",
   },

@@ -1,3 +1,4 @@
+import { shadowStyle } from "@/lib/shadow";
 import { api } from '@/lib/api';
 import { getApiErrorMessage, logClientError } from '@/lib/log';
 import { Feather } from '@expo/vector-icons';
@@ -8,6 +9,7 @@ import {
   ActivityIndicator,
   Alert,
   AppState,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -75,7 +77,23 @@ const [bookingId, setBookingId] = useState<string | null>(null);
       );
       setTxRef(data.tx_ref);
       setPayState('awaiting_payment');
-      await Linking.openURL(data.checkout_url);
+
+      const checkoutUrl = data.checkout_url;
+
+      // On web: deep-link schemes (mental-health-mobile://) aren't handled by browsers
+      if (Platform.OS === 'web') {
+        if (checkoutUrl.startsWith('http://') || checkoutUrl.startsWith('https://')) {
+          // Real Chapa: open checkout in same tab
+          window.location.href = checkoutUrl;
+        } else {
+          // Dev mock: the "checkout_url" IS the return URL — just verify immediately
+          void verifyPayment(data.tx_ref);
+        }
+        return;
+      }
+
+      // Mobile: system deep-link / browser
+      await Linking.openURL(checkoutUrl);
     } catch (e: unknown) {
       logClientError('payment-confirmation.handlePay', e);
       setPayState('idle');
@@ -306,8 +324,7 @@ const s = StyleSheet.create({
   statusCard: {
     backgroundColor: '#FFFFFF', borderRadius: 20, padding: 28,
     alignItems: 'center', marginBottom: 20,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06, shadowRadius: 8, elevation: 3,
+    ...shadowStyle({ color: '#000', offset: { width: 0, height: 2 }, opacity: 0.06, radius: 8, elevation: 3 }),
   },
   statusIcon: { width: 72, height: 72, borderRadius: 36, justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
   statusTitle: { fontSize: 20, fontWeight: '800', color: '#111827', marginBottom: 8, textAlign: 'center' },
@@ -328,8 +345,7 @@ const s = StyleSheet.create({
   card: {
     backgroundColor: '#FFFFFF', borderRadius: 20, padding: 16, marginBottom: 14,
     borderWidth: StyleSheet.hairlineWidth, borderColor: '#E5E7EB',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04, shadowRadius: 4, elevation: 2,
+    ...shadowStyle({ color: '#000', offset: { width: 0, height: 1 }, opacity: 0.04, radius: 4, elevation: 2 }),
   },
   doctorRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   avatar: {

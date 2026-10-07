@@ -1,3 +1,4 @@
+import { shadowStyle } from "@/lib/shadow";
 /**
  * book.tsx  (app/(tabs)/(user-tabs)/book.tsx)
  *
@@ -569,11 +570,7 @@ const s = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: "#E5E7EB",
     gap: 12,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 2,
+    ...shadowStyle({ color: "#000", offset: { width: 0, height: 1 }, opacity: 0.04, radius: 4, elevation: 2 }),
   },
   doctorAvatarWrap: { position: "relative" },
   doctorAvatar: {

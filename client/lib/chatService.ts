@@ -1,36 +1,51 @@
 import { useChatStore, ChatMessage, CallLog } from '@/stores/chatStore';
 import { initSocket, getSocket } from './socket';
 import { API_URL } from './api';
+import { getStoredAuthToken } from './auth';
 
 export const CHAT_SERVER = API_URL;
 
 let _me = '';
 let _peer = () => useChatStore.getState().peer;
 
+async function authHeaders(): Promise<Record<string, string>> {
+  const token = (await import('@/stores/authStore')).useAuthStore.getState().accessToken || (await getStoredAuthToken());
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+async function legacyFetch(path: string, init?: RequestInit): Promise<Response> {
+  const headers = {
+  ...(await authHeaders()),
+  ...(init?.headers as Record<string, string> | undefined),
+  };
+  return fetch(`${CHAT_SERVER}${path}`, { ...init, headers });
+}
+
 export function connectSocket(username: string, token?: string): void {
   _me = username;
   const socket = initSocket(token);
 
   socket.on('connect', () => {
-    console.log('[Socket] Connected as:', username);
+    if (__DEV__) console.log('[Socket] Connected');
     socket!.emit('user-online', { username });
   });
 
   socket.on('users-updated', async () => {
     try {
-      const r = await fetch(`${CHAT_SERVER}/api/chat/users`);
+      const r = await legacyFetch('/api/chat/users');
+      if (!r.ok) return;
       const users = await r.json();
       useChatStore.getState().setUsers(users);
     } catch (e) {
-      console.error('[Socket] Failed to load users:', e);
+      if (__DEV__) console.error('[Socket] Failed to load users:', e);
     }
   });
 
-  socket.on('receive-message', (msg: any) => {
+  socket.on('receive-message', (msg: Record<string, unknown>) => {
     const peer = _peer();
     if (!peer) return;
-    const senderId = msg.sender_id?.toString?.() ?? msg.from;
-    const receiverId = msg.receiver_id?.toString?.() ?? msg.to;
+    const senderId = (msg.sender_id as { toString?: () => string })?.toString?.() ?? String(msg.from ?? '');
+    const receiverId = (msg.receiver_id as { toString?: () => string })?.toString?.() ?? String(msg.to ?? '');
     const involves =
       (senderId === _me && receiverId === peer) ||
       (senderId === peer && receiverId === _me);
@@ -39,17 +54,17 @@ export function connectSocket(username: string, token?: string): void {
         ...msg,
         from: senderId,
         to: receiverId,
-        timestamp: msg.created_at ?? msg.timestamp,
-      });
+        timestamp: (msg.created_at as string | undefined) ?? (msg.timestamp as string | undefined),
+      } as ChatMessage);
     }
   });
 
   socket.on('connect_error', (err) => {
-    console.error('[Socket] Connection error:', err);
+    if (__DEV__) console.error('[Socket] Connection error:', err);
   });
 
   socket.on('disconnect', (reason) => {
-    console.log('[Socket] Disconnected:', reason);
+    if (__DEV__) console.log('[Socket] Disconnected:', reason);
   });
 
   socket.connect();
@@ -85,14 +100,15 @@ export function emitSpSignal(to: string, signal: unknown): void {
   getSocket()?.emit('sp-signal', { to, signal });
 }
 
+/** @deprecated Legacy chat login — server derives identity from Bearer token. */
 export async function apiLogin(
   username: string,
-  password: string,
+  _password: string,
 ): Promise<{ userId: string; username: string }> {
-  const r = await fetch(`${CHAT_SERVER}/api/chat/login`, {
+  const r = await legacyFetch('/api/chat/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({ username }),
   });
   const d = await r.json();
   if (!r.ok) throw new Error(d.error ?? 'Login failed');
@@ -100,15 +116,17 @@ export async function apiLogin(
 }
 
 export async function apiLoadUsers(): Promise<void> {
-  const r = await fetch(`${CHAT_SERVER}/api/chat/users`);
+  const r = await legacyFetch('/api/chat/users');
+  if (!r.ok) throw new Error('Failed to load users');
   useChatStore.getState().setUsers(await r.json());
 }
 
 export async function apiLoadTimeline(userA: string, userB: string): Promise<void> {
   const [mRes, cRes] = await Promise.all([
-    fetch(`${CHAT_SERVER}/api/chat/messages/${userA}/${userB}`),
-    fetch(`${CHAT_SERVER}/api/chat/calls/${userA}/${userB}`),
+    legacyFetch(`/api/chat/messages/${encodeURIComponent(userA)}/${encodeURIComponent(userB)}`),
+    legacyFetch(`/api/chat/calls/${encodeURIComponent(userA)}/${encodeURIComponent(userB)}`),
   ]);
+  if (!mRes.ok || !cRes.ok) throw new Error('Failed to load timeline');
   const messages: ChatMessage[] = await mRes.json();
   const calls: CallLog[] = await cRes.json();
   const tagged = [
@@ -124,9 +142,14 @@ export async function apiLoadTimeline(userA: string, userB: string): Promise<voi
 
 export async function apiUploadVoice(uri: string): Promise<string> {
   const fd = new FormData();
-  fd.append('audio', { uri, name: 'voice.webm', type: 'audio/webm' } as any);
-  const r = await fetch(`${CHAT_SERVER}/api/chat/upload-voice`, { method: 'POST', body: fd });
+  fd.append('audio', { uri, name: 'voice.webm', type: 'audio/webm' } as unknown as Blob);
+  const headers = await authHeaders();
+  const r = await fetch(`${CHAT_SERVER}/api/chat/upload-voice`, {
+    method: 'POST',
+    headers,
+    body: fd,
+  });
   const d = await r.json();
-  if (d.error) throw new Error(d.error);
+  if (!r.ok || d.error) throw new Error(d.error ?? 'Upload failed');
   return d.fileUrl as string;
 }

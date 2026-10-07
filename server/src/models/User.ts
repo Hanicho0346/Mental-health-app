@@ -95,6 +95,17 @@ ai_chats_daily_limit: {
   default: 5,
 },
 
+ai_chats_used_today: {
+  type: Number,
+  default: 0,
+},
+
+/** Calendar day (YYYY-MM-DD, Africa/Addis_Ababa) for daily AI usage reset */
+ai_chat_usage_date: {
+  type: String,
+  default: '',
+},
+
 student_id: {
   type: String,
   default: '',
@@ -128,7 +139,7 @@ push_token: {
 // Rule: declare ONCE — either inline OR here, never both.
 // All unique/sparse indexes live here for clarity.
 
-userSchema.index({ clerk_id: 1 },       { unique: true, sparse: true }); // null allowed for non-Clerk users
+userSchema.index({ clerk_id: 1 }, { unique: true, sparse: true }); // legacy optional field
 userSchema.index({ email: 1 },          { unique: true });
 userSchema.index({ national_id: 1 },    { unique: true, sparse: true }); // null for regular users
 userSchema.index({ medical_license: 1 },{ unique: true, sparse: true }); // null for regular users

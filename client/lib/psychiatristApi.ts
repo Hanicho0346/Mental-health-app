@@ -1,41 +1,42 @@
-import {api} from './api';
-import * as SecureStore from 'expo-secure-store';
+import { api } from './api';
+import { useAuthStore } from '@/stores/authStore';
 
-// Get current user ID - you might need to adjust this based on your auth setup
 const getCurrentUserId = async (): Promise<string | null> => {
-  try {
-    // Option 1: If using Clerk
-    // const { userId } = useAuth();
-    // return userId;
-    
-    // Option 2: If using your auth store with AsyncStorage
-    const userStr = await SecureStore.getItemAsync('user');
-    if (userStr) {
-      const user = JSON.parse(userStr);
-      return user.id || user._id;
-    }
-    
-    // Option 3: Get from your auth store's state
-    // You might need to import your store here
-    return null;
-  } catch (error) {
-    console.error('Error getting user ID:', error);
-    return null;
-  }
+  return useAuthStore.getState().user?.id ?? null;
 };
 
 // Document types
 export type DocumentType = 'profile' | 'psychiatrist_doc' | 'wellness_video';
 
-// Fetch full profile - No userId parameter needed for current user
+// Fetch full profile - merges /users/me + /psychiatrist/profile
 export const fetchPsychiatristFullProfile = async () => {
-  try {
-    const response = await api.get('/users/me');
-    return response.data;
-  } catch (error) {
-    console.error('Error fetching psychiatrist profile:', error);
-    throw error;
-  }
+  const [meRes, profileRes] = await Promise.all([
+    api.get('/users/me'),
+    api.get('/psychiatrist/profile').catch(() => ({ data: {} })),
+  ]);
+  const me = meRes.data;
+  const v = profileRes.data?.verification ?? {};
+  return {
+    id: me.id,
+    email: me.email,
+    full_name: me.full_name,
+    role: me.role,
+    national_id: me.national_id,
+    created_at: me.createdAt,
+    verification_status: me.verification_status ?? v.verification_status ?? null,
+    is_approved: me.is_approved ?? v.is_approved ?? false,
+    admin_feedback: me.admin_feedback ?? v.admin_feedback ?? '',
+    is_suspended: v.is_suspended ?? false,
+    suspension_reason: v.suspension_reason ?? '',
+    specialization: v.specialization ?? null,
+    license_number: v.license_number ?? null,
+    years_of_experience: v.years_of_experience ?? null,
+    hospital_or_clinic: v.hospital_or_clinic ?? me.hospital_or_clinic ?? null,
+    phone: v.phone ?? null,
+    uploaded_documents: v.uploaded_documents ?? [],
+    wallet_balance: v.wallet_balance ?? 0,
+    wallet_currency: v.wallet_currency ?? 'ETB',
+  };
 };
 
 // Fetch verification status - No userId parameter needed

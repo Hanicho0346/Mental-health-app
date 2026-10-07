@@ -11,6 +11,7 @@ const User_js_1 = require("../../models/User.js");
 const PsychiatristProfile_js_1 = require("../../models/PsychiatristProfile.js");
 const auth_service_js_1 = require("../auth/auth.service.js");
 const AppError_js_1 = require("../../utils/AppError.js");
+const logger_js_1 = require("../../utils/logger.js");
 const SALT_ROUNDS = 12;
 function resolveBootstrapRole(email) {
     if (env_js_1.env.adminBootstrapEmails.includes(email.toLowerCase())) {
@@ -22,13 +23,20 @@ async function ensureUnusedPassword() {
     return bcryptjs_1.default.hash((0, node_crypto_1.randomBytes)(32).toString('hex'), SALT_ROUNDS);
 }
 async function syncClerkAccount(session, body, req) {
+    (0, logger_js_1.logServerInfo)('clerk.sync.start', { requestedRole: body.role ?? 'user' });
     const bootstrapRole = resolveBootstrapRole(session.email);
-    let user = await User_js_1.User.findOne({ clerk_id: session.clerkId });
+    let user = await User_js_1.User.findOne({
+        clerk_id: session.clerkId,
+    });
+    // find by email if clerk_id missing
     if (!user) {
-        const byEmail = await User_js_1.User.findOne({ email: session.email });
+        const byEmail = await User_js_1.User.findOne({
+            email: session.email,
+        });
         if (byEmail) {
-            if (byEmail.clerk_id && byEmail.clerk_id !== session.clerkId) {
-                // Development-safe auto relink
+            // relink existing account
+            if (byEmail.clerk_id &&
+                byEmail.clerk_id !== session.clerkId) {
                 byEmail.clerk_id = session.clerkId;
                 byEmail.email_verified = true;
                 byEmail.full_name = session.fullName;
@@ -42,26 +50,43 @@ async function syncClerkAccount(session, body, req) {
                 $set: {
                     clerk_id: session.clerkId,
                     full_name: session.fullName,
-                    avatar_url: session.profileImage || byEmail.avatar_url,
+                    avatar_url: session.profileImage ||
+                        byEmail.avatar_url,
                     email_verified: true,
                 },
             }, { new: true });
         }
     }
-    const requestedRole = bootstrapRole ?? (body.role === 'psychiatrist' ? 'psychiatrist' : 'user');
+    // determine requested role
+    const requestedRole = bootstrapRole ||
+        (body.role === 'psychiatrist'
+            ? 'psychiatrist'
+            : 'user');
     const isNewPsychiatrist = requestedRole === 'psychiatrist';
+    // CREATE NEW USER
     if (!user) {
         const passwordHash = await ensureUnusedPassword();
-        const verificationStatus = isNewPsychiatrist ? 'pending' : undefined;
+        const verificationStatus = isNewPsychiatrist
+            ? 'pending'
+            : undefined;
         const isApproved = (0, User_js_1.computeIsApproved)(requestedRole, verificationStatus);
+        // validate psychiatrist fields
         if (isNewPsychiatrist) {
+            if (!body.national_id ||
+                !body.medical_license ||
+                !body.specialization) {
+                throw new AppError_js_1.AppError(400, 'Missing psychiatrist registration fields');
+            }
             const nationalId = body.national_id.trim();
             const license = body.medical_license.trim();
             const conflict = await User_js_1.User.findOne({
-                $or: [{ national_id: nationalId }, { medical_license: license }],
+                $or: [
+                    { national_id: nationalId },
+                    { medical_license: license },
+                ],
             }).lean();
             if (conflict) {
-                throw new AppError_js_1.AppError(409, 'National ID or medical license is already registered');
+                throw new AppError_js_1.AppError(409, 'National ID or medical license already exists');
             }
         }
         user = await User_js_1.User.create({
@@ -76,38 +101,69 @@ async function syncClerkAccount(session, body, req) {
             ...(isNewPsychiatrist
                 ? {
                     verification_status: 'pending',
-                    national_id: body.national_id.trim(),
-                    medical_license: body.medical_license.trim(),
-                    specialization: body.specialization.trim(),
-                    experience_years: body.experience_years,
+                    national_id: body.national_id?.trim(),
+                    medical_license: body.medical_license?.trim(),
+                    specialization: body.specialization?.trim(),
+                    experience_years: body.experience_years ?? 0,
                     hospital_or_clinic: body.hospital_or_clinic?.trim() ?? '',
                 }
                 : {}),
         });
+        // create psychiatrist profile
         if (isNewPsychiatrist) {
             await PsychiatristProfile_js_1.PsychiatristProfile.create({
                 user_id: user._id,
-                specialization: body.specialization.trim(),
-                license_number: body.medical_license.trim(),
-                years_of_experience: body.experience_years,
+                specialization: body.specialization?.trim() ?? '',
+                license_number: body.medical_license?.trim() ?? '',
+                years_of_experience: body.experience_years ?? 0,
                 hospital_or_clinic: body.hospital_or_clinic?.trim() ?? '',
                 approval_status: 'pending',
             });
         }
     }
     else {
+        // UPDATE EXISTING USER
         const updates = {
             full_name: session.fullName,
-            avatar_url: session.profileImage || user.avatar_url,
+            avatar_url: session.profileImage ||
+                user.avatar_url,
             email_verified: true,
         };
+        // admin bootstrap
         if (bootstrapRole) {
             updates.role = bootstrapRole;
             updates.is_approved = true;
             updates.verification_status = undefined;
         }
-        else if (body.role === 'psychiatrist' && user.role === 'user') {
-            throw new AppError_js_1.AppError(400, 'Cannot upgrade to psychiatrist via sync; contact support');
+        // upgrade user -> psychiatrist
+        else if (body.role === 'psychiatrist' &&
+            user.role === 'user') {
+            updates.role = 'psychiatrist';
+            updates.verification_status = 'pending';
+            updates.is_approved = false;
+            updates.national_id =
+                body.national_id?.trim();
+            updates.medical_license =
+                body.medical_license?.trim();
+            updates.specialization =
+                body.specialization?.trim();
+            updates.experience_years =
+                body.experience_years ?? 0;
+            updates.hospital_or_clinic =
+                body.hospital_or_clinic?.trim() ?? '';
+            const existingProfile = await PsychiatristProfile_js_1.PsychiatristProfile.findOne({
+                user_id: user._id,
+            });
+            if (!existingProfile) {
+                await PsychiatristProfile_js_1.PsychiatristProfile.create({
+                    user_id: user._id,
+                    specialization: body.specialization?.trim() ?? '',
+                    license_number: body.medical_license?.trim() ?? '',
+                    years_of_experience: body.experience_years ?? 0,
+                    hospital_or_clinic: body.hospital_or_clinic?.trim() ?? '',
+                    approval_status: 'pending',
+                });
+            }
         }
         user = await User_js_1.User.findByIdAndUpdate(user._id, { $set: updates }, { new: true });
         if (!user) {
@@ -116,8 +172,11 @@ async function syncClerkAccount(session, body, req) {
     }
     const auth = await (0, auth_service_js_1.issueAuthResponse)(user._id.toString(), req);
     const profile = user.role === 'psychiatrist'
-        ? await PsychiatristProfile_js_1.PsychiatristProfile.findOne({ user_id: user._id }).lean()
+        ? await PsychiatristProfile_js_1.PsychiatristProfile.findOne({
+            user_id: user._id,
+        }).lean()
         : null;
+    (0, logger_js_1.logServerInfo)('clerk.sync.success', { userId: user._id.toString(), role: user.role });
     return {
         ...auth,
         user: {

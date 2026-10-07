@@ -67,12 +67,23 @@ export const listMessages: RequestHandler = async (req, res) => {
       return;
     }
 
-    const messages = await ChatMessage.find({ conversation_id: conversation._id })
-      .sort({ timestamp: 1 })
+    const rawLimit = parseInt(String(req.query.limit ?? '50'), 10);
+    const rawBefore = req.query.before;
+    const limit = Math.min(Math.max(rawLimit, 1), 100);
+
+    const filter: Record<string, unknown> = { conversation_id: conversation._id };
+    if (typeof rawBefore === 'string' && rawBefore) {
+      const beforeDate = new Date(rawBefore);
+      if (!isNaN(beforeDate.getTime())) filter.timestamp = { $lt: beforeDate };
+    }
+
+    const messages = await ChatMessage.find(filter)
+      .sort({ timestamp: -1 })
+      .limit(limit)
       .lean();
 
     res.json(
-      messages.map((m) => ({
+      messages.reverse().map((m) => ({
         id:          m._id.toString(),
         sender_id:   m.from.toString(),
         receiver_id: m.to.toString(),
@@ -107,7 +118,6 @@ export const getConversations: RequestHandler = async (req, res) => {
 
     const userId = new mongoose.Types.ObjectId(req.userId);
 
-    // ── Step 1: Find all active conversations this user participates in ────
     const conversations = await Conversation.find({
       participants: userId,
       status: 'active',
@@ -118,41 +128,38 @@ export const getConversations: RequestHandler = async (req, res) => {
       )
       .lean();
 
-    // ── Step 2: For each conversation, find the last ChatMessage ──────────
-    const results = await Promise.all(
-      conversations.map(async (conv) => {
-        // The peer is the other participant
-        const peer = conv.participants.find(
-          (p) => p._id.toString() !== req.userId
-        );
+    const convIds = conversations.map((c) => c._id);
 
-        if (!peer) return null;
+    // Batch: one query for last messages, one for unread counts
+    const [lastMsgs, unreadCounts] = await Promise.all([
+      ChatMessage.aggregate([
+        { $match: { conversation_id: { $in: convIds } } },
+        { $sort: { timestamp: -1 } },
+        { $group: { _id: '$conversation_id', content: { $first: '$content' }, timestamp: { $first: '$timestamp' } } },
+      ]),
+      ChatMessage.aggregate([
+        { $match: { conversation_id: { $in: convIds }, to: userId, is_read: false } },
+        { $group: { _id: '$conversation_id', count: { $sum: 1 } } },
+      ]),
+    ]);
 
-        // Fetch the most recent message for this conversation (index on conversation_id + timestamp)
-        const lastMsg = await ChatMessage.findOne({ conversation_id: conv._id })
-          .sort({ timestamp: -1 })
-          .select('content from timestamp')
-          .lean();
+    const lastMsgMap = new Map(lastMsgs.map((m) => [m._id.toString(), m]));
+    const unreadMap = new Map(unreadCounts.map((u) => [u._id.toString(), u.count as number]));
 
-        // Count unread messages sent TO this user
-        const unreadCount = await ChatMessage.countDocuments({
-          conversation_id: conv._id,
-          to: userId,
-          is_read: false,
-        });
-
-        return {
-          peerId:          peer._id.toString(),
-          // FIX: use full_name; never fall back to the raw ObjectId string
-          peerName:        peer.full_name ?? 'User',
-          peerAvatar:      peer.avatar_url ?? null,
-          isOnline:        peer.is_online ?? false,
-          lastMessage:     lastMsg?.content ?? 'No messages yet',
-          lastMessageTime: lastMsg?.timestamp ?? null,
-          unreadCount,
-        };
-      })
-    );
+    const results = conversations.map((conv) => {
+      const peer = conv.participants.find((p) => p._id.toString() !== req.userId);
+      if (!peer) return null;
+      const last = lastMsgMap.get(conv._id.toString());
+      return {
+        peerId:          peer._id.toString(),
+        peerName:        peer.full_name ?? 'User',
+        peerAvatar:      peer.avatar_url ?? null,
+        isOnline:        peer.is_online ?? false,
+        lastMessage:     last?.content ?? 'No messages yet',
+        lastMessageTime: last?.timestamp ?? null,
+        unreadCount:     unreadMap.get(conv._id.toString()) ?? 0,
+      };
+    });
 
     res.json(results.filter(Boolean));
   } catch (err) {
@@ -178,6 +185,10 @@ export const createMessage: RequestHandler = async (req, res) => {
     const { receiver_id, content } = req.body as Record<string, unknown>;
     if (typeof receiver_id !== 'string' || typeof content !== 'string') {
       res.status(400).json({ error: 'receiver_id and content are required' });
+      return;
+    }
+    if (!content.trim() || content.length > 4000) {
+      res.status(400).json({ error: 'content must be 1–4000 characters' });
       return;
     }
     if (!mongoose.Types.ObjectId.isValid(receiver_id)) {

@@ -15,33 +15,35 @@ const mongoose_1 = __importDefault(require("mongoose"));
 const booking_js_1 = require("../models/booking.js");
 const WalletTransaction_js_1 = require("../models/WalletTransaction.js");
 const User_js_1 = require("../models/User.js");
+const Conversation_js_1 = require("../models/Conversation.js");
+const Appointment_js_1 = require("../models/Appointment.js");
 const chapa_service_js_1 = require("../services/chapa.service.js");
 const AppError_js_1 = require("../utils/AppError.js");
 const BOOKING_AMOUNT = 300;
-const PSYCHIATRIST_PCT = 0.70; // ETB 210
-const PLATFORM_PCT = 0.30; // ETB 90
+const PSYCHIATRIST_PCT = 0.70;
+const PLATFORM_PCT = 0.30;
 function generateTxRef(userId) {
     return `SELAM-${userId.slice(-6)}-${Date.now()}`;
 }
 // ── Initiate booking + Chapa checkout ─────────────────────────────────────────
 async function initiateBooking(params) {
     const { userId, psychiatristId, scheduledAt, timeLabel, callbackUrl, returnUrl } = params;
-    const psychiatrist = await User_js_1.User.findById(psychiatristId).lean();
-    if (!psychiatrist || psychiatrist.role !== 'psychiatrist' || !psychiatrist.is_approved) {
+    const [psychiatrist, user, existing] = await Promise.all([
+        User_js_1.User.findById(psychiatristId).lean(),
+        User_js_1.User.findById(userId).lean(),
+        booking_js_1.Booking.findOne({
+            user_id: new mongoose_1.default.Types.ObjectId(userId),
+            psychiatrist_id: new mongoose_1.default.Types.ObjectId(psychiatristId),
+            payment_status: 'paid',
+            booking_status: { $in: ['confirmed', 'pending'] },
+        }).lean(),
+    ]);
+    if (!psychiatrist || psychiatrist.role !== 'psychiatrist' || !psychiatrist.is_approved)
         throw new AppError_js_1.AppError(404, 'Psychiatrist not found or not approved');
-    }
-    // Block duplicate active paid bookings
-    const existing = await booking_js_1.Booking.findOne({
-        user_id: new mongoose_1.default.Types.ObjectId(userId),
-        psychiatrist_id: new mongoose_1.default.Types.ObjectId(psychiatristId),
-        payment_status: 'paid',
-        booking_status: { $in: ['confirmed', 'pending'] },
-    }).lean();
-    if (existing)
-        throw new AppError_js_1.AppError(409, 'You already have an active booking with this psychiatrist');
-    const user = await User_js_1.User.findById(userId).lean();
     if (!user)
         throw new AppError_js_1.AppError(404, 'User not found');
+    if (existing)
+        throw new AppError_js_1.AppError(409, 'You already have an active booking with this psychiatrist');
     const tx_ref = generateTxRef(userId);
     const nameParts = (user.full_name ?? '').split(' ');
     const { checkout_url } = await (0, chapa_service_js_1.initiateChapaPayment)({
@@ -88,40 +90,77 @@ async function verifyAndCompleteBooking(tx_ref) {
         await booking_js_1.Booking.updateOne({ _id: booking._id }, { $set: { payment_status: 'failed' } });
         throw new AppError_js_1.AppError(402, `Payment not successful (status: ${status})`);
     }
-    // Step 4: atomic idempotency guard — only one process can flip already_processed from false→true.
-    //         findOneAndUpdate returns null if already_processed was already true (another process won).
-    const updated = await booking_js_1.Booking.findOneAndUpdate({ _id: booking._id, already_processed: false }, {
-        $set: {
-            payment_status: 'paid',
-            booking_status: 'confirmed',
-            already_processed: true,
-        },
-    }, { new: true }).lean();
+    // Step 4: atomic idempotency guard — only one process wins the race
+    const updated = await booking_js_1.Booking.findOneAndUpdate({ _id: booking._id, already_processed: false }, { $set: { payment_status: 'paid', booking_status: 'confirmed', already_processed: true } }, { new: true }).lean();
     // Another process already completed this — return safely
     if (!updated) {
         const current = await booking_js_1.Booking.findById(booking._id).lean();
         return { already_paid: true, booking: current ?? booking };
     }
     const bookingId = updated._id;
-    // Step 5: find admin for platform commission
-    const admin = await User_js_1.User.findOne({ role: 'admin' }).lean();
-    // Step 6: credit wallets with atomic $inc — no session/transaction needed.
-    //         already_processed flag above guarantees these run exactly once.
-    // 6a. Psychiatrist wallet — 70% (ETB 210)
-    await User_js_1.User.updateOne({ _id: updated.psychiatrist_id }, { $inc: { wallet_balance: updated.psychiatrist_share } });
-    await WalletTransaction_js_1.WalletTransaction.create({
-        user_id: updated.psychiatrist_id,
-        booking_id: bookingId,
-        amount: updated.psychiatrist_share,
-        transaction_type: 'session_earning',
-        payment_reference: tx_ref,
-        status: 'completed',
-        description: `Session earning (70%) from booking ${bookingId}`,
-    });
-    // 6b. Admin wallet — 30% (ETB 90)
+    const psychiatristId = updated.psychiatrist_id;
+    const userId = updated.user_id;
+    // Step 5: fetch admin + psychiatrist info needed downstream — in parallel
+    const [admin, psychiatrist] = await Promise.all([
+        User_js_1.User.findOne({ role: 'admin' }).lean(),
+        User_js_1.User.findById(psychiatristId).lean(),
+    ]);
+    // Step 5.5: unlock chat + create appointment — both independent, run in parallel
+    await Promise.all([
+        // 5.5a: unlock private chat room — safe to call more than once via unique index on booking_id
+        Conversation_js_1.Conversation.findOneAndUpdate({ booking_id: bookingId }, {
+            $setOnInsert: {
+                booking_id: bookingId,
+                user_id: userId,
+                psychiatrist_id: psychiatristId,
+                participants: [userId, psychiatristId],
+                status: 'active',
+            },
+        }, { upsert: true, new: true }),
+        // 5.5b: create appointment record — only if scheduled_at was provided
+        // Uses findOneAndUpdate to stay idempotent (booking_id unique guard)
+        Appointment_js_1.Appointment.findOneAndUpdate(
+        // tie appointment uniquely to this booking via counselor_id = tx_ref
+        { counselor_id: tx_ref }, {
+            $setOnInsert: {
+                user_id: userId,
+                psychiatrist_user_id: psychiatristId,
+                counselor_id: tx_ref, // unique ref to this booking
+                counselor_name: psychiatrist?.full_name ?? 'Psychiatrist',
+                scheduled_at: updated.scheduled_at ?? new Date(),
+                time_label: updated.time_label ?? '',
+                appointment_type: 'Video Call',
+                notes: '',
+            },
+        }, { upsert: true, new: true }),
+    ]);
+    // Step 6: credit wallets — all writes independent, run in parallel
+    const walletWrites = [
+        // 6a. Psychiatrist — 70% (ETB 210)
+        User_js_1.User.updateOne({ _id: psychiatristId }, { $inc: { wallet_balance: updated.psychiatrist_share } }),
+        WalletTransaction_js_1.WalletTransaction.create({
+            user_id: psychiatristId,
+            booking_id: bookingId,
+            amount: updated.psychiatrist_share,
+            transaction_type: 'session_earning',
+            payment_reference: tx_ref,
+            status: 'completed',
+            description: `Session earning (70%) from booking ${bookingId}`,
+        }),
+        // 6c. Payment record for the user
+        WalletTransaction_js_1.WalletTransaction.create({
+            user_id: userId,
+            booking_id: bookingId,
+            amount: updated.amount,
+            transaction_type: 'payment_received',
+            payment_reference: `${tx_ref}-user`,
+            status: 'completed',
+            description: `Payment of ETB ${updated.amount} for session booking ${bookingId}`,
+        }),
+    ];
+    // 6b. Admin — 30% (ETB 90) — only if admin exists
     if (admin) {
-        await User_js_1.User.updateOne({ _id: admin._id }, { $inc: { wallet_balance: updated.platform_fee } });
-        await WalletTransaction_js_1.WalletTransaction.create({
+        walletWrites.push(User_js_1.User.updateOne({ _id: admin._id }, { $inc: { wallet_balance: updated.platform_fee } }), WalletTransaction_js_1.WalletTransaction.create({
             user_id: admin._id,
             booking_id: bookingId,
             amount: updated.platform_fee,
@@ -129,18 +168,9 @@ async function verifyAndCompleteBooking(tx_ref) {
             payment_reference: `${tx_ref}-platform`,
             status: 'completed',
             description: `Platform commission (30%) from booking ${bookingId}`,
-        });
+        }));
     }
-    // 6c. Payment record for the user
-    await WalletTransaction_js_1.WalletTransaction.create({
-        user_id: updated.user_id,
-        booking_id: bookingId,
-        amount: updated.amount,
-        transaction_type: 'payment_received',
-        payment_reference: `${tx_ref}-user`,
-        status: 'completed',
-        description: `Payment of ETB ${updated.amount} for session booking ${bookingId}`,
-    });
+    await Promise.all(walletWrites);
     return { already_paid: false, booking: updated };
 }
 // ── Check if user has paid access to a psychiatrist ───────────────────────────
@@ -160,10 +190,13 @@ async function getPaidPsychiatristsForUser(userId) {
         payment_status: 'paid',
         booking_status: { $in: ['confirmed', 'completed'] },
     }).lean();
+    if (!bookings.length)
+        return [];
     const psychiatristIds = bookings.map((b) => b.psychiatrist_id);
     const psychiatrists = await User_js_1.User.find({ _id: { $in: psychiatristIds } })
         .select('full_name email avatar_url specialization is_online')
         .lean();
+    const bookingMap = new Map(bookings.map((b) => [b.psychiatrist_id.toString(), b]));
     return psychiatrists.map((p) => ({
         id: p._id.toString(),
         full_name: p.full_name,
@@ -171,19 +204,21 @@ async function getPaidPsychiatristsForUser(userId) {
         avatar_url: p.avatar_url ?? '',
         specialization: p.specialization ?? '',
         is_online: p.is_online ?? false,
-        booking: bookings.find((b) => b.psychiatrist_id.toString() === p._id.toString()),
+        booking: bookingMap.get(p._id.toString()),
     }));
 }
 // ── Get wallet balance + transaction history for a user ───────────────────────
 async function getWalletForUser(userId) {
-    const user = await User_js_1.User.findById(userId).select('wallet_balance').lean();
-    const balance = user?.wallet_balance ?? 0;
-    const transactions = await WalletTransaction_js_1.WalletTransaction.find({ user_id: new mongoose_1.default.Types.ObjectId(userId) })
-        .sort({ created_at: -1 })
-        .limit(50)
-        .lean();
+    const uid = new mongoose_1.default.Types.ObjectId(userId);
+    const [user, transactions] = await Promise.all([
+        User_js_1.User.findById(uid).select('wallet_balance').lean(),
+        WalletTransaction_js_1.WalletTransaction.find({ user_id: uid })
+            .sort({ created_at: -1 })
+            .limit(50)
+            .lean(),
+    ]);
     return {
-        balance,
+        balance: user?.wallet_balance ?? 0,
         transactions: transactions.map((t) => ({
             id: t._id.toString(),
             amount: t.amount,
@@ -205,13 +240,13 @@ async function listAllBookings(filters) {
         .sort({ createdAt: -1 })
         .limit(filters?.limit ?? 100)
         .lean();
+    if (!bookings.length)
+        return [];
     const userIds = [...new Set([
             ...bookings.map((b) => b.user_id.toString()),
             ...bookings.map((b) => b.psychiatrist_id.toString()),
         ])];
-    const users = await User_js_1.User.find({ _id: { $in: userIds } })
-        .select('full_name email role')
-        .lean();
+    const users = await User_js_1.User.find({ _id: { $in: userIds } }).select('full_name email role').lean();
     const userMap = new Map(users.map((u) => [u._id.toString(), u]));
     return bookings.map((b) => ({
         id: b._id.toString(),

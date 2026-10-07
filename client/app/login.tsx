@@ -1,14 +1,15 @@
+import { shadowStyle } from "@/lib/shadow";
 import { api } from "@/lib/api";
 import { getApiErrorMessage, logClientError } from "@/lib/log";
+import { showAlert } from "@/lib/showAlert";
 import { resolvePostAuthRoute } from "@/lib/sessionRouting";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useState } from "react";
-import { useAuthStore } from "@/stores/authStore";
+import { pickAuthUser, useAuthStore } from "@/stores/authStore";
 import { useChatStore } from "@/stores/chatStore";
 import {
   ActivityIndicator,
-  Alert,
   ScrollView,
   StyleSheet,
   Text,
@@ -25,11 +26,16 @@ export default function LoginScreen() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
   async function handleLogin() {
     if (submitting) return;
-    if (!email.trim() || !password) {
-      Alert.alert("Login failed", "Please enter both email and password.");
+    setFormError(null);
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail || !password) {
+      const msg = "Please enter both email and password.";
+      setFormError(msg);
+      showAlert("Login failed", msg);
       return;
     }
 
@@ -40,7 +46,7 @@ export default function LoginScreen() {
         refreshToken: string;
         user: Record<string, unknown>;
       }>('/auth/login', {
-        email: email.trim(),
+        email: cleanEmail,
         password,
       });
 
@@ -48,32 +54,34 @@ export default function LoginScreen() {
         throw new Error('Login response was invalid.');
       }
 
+      const user = pickAuthUser(data.user);
+
       setSession({
         accessToken: String(data.accessToken),
         refreshToken: String(data.refreshToken),
-        user: data.user,
+        user,
       });
 
       useChatStore.getState().setMe({
-        _id: String(data.user.id ?? ''),
-        userId: String(data.user.id ?? ''),
-        username: String(data.user.full_name ?? ''),
-        full_name: String(data.user.full_name ?? ''),
-        email: String(data.user.email ?? ''),
+        _id: user.id,
+        userId: user.id,
+        username: user.full_name,
+        full_name: user.full_name,
+        email: user.email,
       });
 
-      requestAnimationFrame(() => {
-        router.replace(resolvePostAuthRoute(data.user));
-      });
+      const nextRoute = resolvePostAuthRoute(user);
+      router.replace(nextRoute as any);
     } catch (e: unknown) {
       logClientError('login.handleLogin', e);
       const msg = getApiErrorMessage(e);
       if (/not verified/i.test(msg)) {
-        Alert.alert('Email not verified', 'Please verify your email before logging in.');
-        router.replace({ pathname: '/verify-email', params: { email: email.trim() } });
+        showAlert('Email not verified', 'Please verify your email before logging in.');
+        router.replace({ pathname: '/verify-email', params: { email: cleanEmail } });
         return;
       }
-      Alert.alert('Login failed', msg);
+      setFormError(msg);
+      showAlert('Login failed', msg);
     } finally {
       setSubmitting(false);
     }
@@ -92,7 +100,11 @@ export default function LoginScreen() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView style={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={styles.logoSection}>
           <View style={styles.iconCircle}>
             <Feather name="shield" size={24} color="#4ADE80" />
@@ -103,6 +115,13 @@ export default function LoginScreen() {
           <Text style={styles.mainTitle}>Welcome Back</Text>
           <Text style={styles.amharicMainTitle}>እንኳን ደህና መጡ</Text>
         </View>
+
+        {formError ? (
+          <View style={styles.errorBox}>
+            <Feather name="alert-circle" size={16} color="#B91C1C" />
+            <Text style={styles.errorText}>{formError}</Text>
+          </View>
+        ) : null}
 
         <View style={styles.formCard}>
           <View style={styles.inputGroup}>
@@ -207,15 +226,23 @@ const styles = StyleSheet.create({
   },
   mainTitle: { fontSize: 22, fontWeight: "bold", color: "#111827" },
   amharicMainTitle: { fontSize: 16, color: "#4ADE80", fontWeight: "bold", marginTop: 4 },
+  errorBox: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+    backgroundColor: "#FEF2F2",
+    borderWidth: 1,
+    borderColor: "#FECACA",
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 16,
+  },
+  errorText: { flex: 1, fontSize: 13, color: "#B91C1C", lineHeight: 18 },
   formCard: {
     backgroundColor: "#FFFFFF",
     borderRadius: 24,
     padding: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 15,
-    elevation: 2,
+    ...shadowStyle({ color: "#000", offset: { width: 0, height: 2 }, opacity: 0.05, radius: 15, elevation: 2 }),
   },
   inputGroup: { marginBottom: 20 },
   label: { fontSize: 14, fontWeight: "600", color: "#111827" },
@@ -239,11 +266,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     marginTop: 24,
-    shadowColor: "#4ADE80",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.25,
-    shadowRadius: 12,
-    elevation: 6,
+    ...shadowStyle({ color: "#4ADE80", offset: { width: 0, height: 8 }, opacity: 0.25, radius: 12, elevation: 6 }),
   },
   continueButtonText: { color: "#111827", fontSize: 16, fontWeight: "700" },
   footer: {

@@ -1,10 +1,10 @@
+import { shadowStyle } from "@/lib/shadow";
 import { api } from "@/lib/api";
 import { clearAuthToken } from "@/lib/auth";
 import { getApiErrorMessage, logClientError } from "@/lib/log";
 import { Feather } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useState } from "react";
-import { useClerk } from "@clerk/clerk-expo";
 import { UpgradeModal } from "@/components/UpgradeModal";
 import {
   Alert,
@@ -283,7 +283,7 @@ function PremierCard({
         {/* Group Chats */}
         <TouchableOpacity
           style={premierStyles.pill}
-          onPress={() => router.push("/groupchats")}
+           onPress={() => router.push("/groupchats" as never)}
         >
           <View
             style={[premierStyles.pillIcon, { backgroundColor: "#EDE9FE" }]}
@@ -342,11 +342,8 @@ export default function ProfileScreen() {
     }, []),
   );
 
-  const { signOut } = useClerk();
-
   async function logout() {
     try {
-      await signOut();
       await clearAuthToken();
       router.replace("/login");
     } catch (e) {
@@ -808,11 +805,7 @@ const premierStyles = StyleSheet.create({
     borderRadius: 24,
     padding: 20,
     marginBottom: 30,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.03,
-    shadowRadius: 10,
-    elevation: 2,
+    ...shadowStyle({ color: "#000", offset: { width: 0, height: 2 }, opacity: 0.03, radius: 10, elevation: 2 }),
   },
   cardHeader: {
     flexDirection: "row",
@@ -1047,11 +1040,7 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     padding: 20,
     marginBottom: 30,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.03,
-    shadowRadius: 10,
-    elevation: 2,
+    ...shadowStyle({ color: "#000", offset: { width: 0, height: 2 }, opacity: 0.03, radius: 10, elevation: 2 }),
   },
 
   statsRow: { flexDirection: "row", gap: 12, marginBottom: 24 },
@@ -1097,11 +1086,7 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     padding: 20,
     marginBottom: 30,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.03,
-    shadowRadius: 10,
-    elevation: 2,
+    ...shadowStyle({ color: "#000", offset: { width: 0, height: 2 }, opacity: 0.03, radius: 10, elevation: 2 }),
   },
   walletBanner: {
     flexDirection: "row",
@@ -1220,11 +1205,7 @@ const styles = StyleSheet.create({
   },
   langActive: {
     backgroundColor: "#FFFFFF",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 1,
+    ...shadowStyle({ color: "#000", offset: { width: 0, height: 1 }, opacity: 0.1, radius: 2, elevation: 1 }),
   },
   langText: { fontSize: 12, fontWeight: "700", color: "#9CA3AF" },
   langTextActive: { fontSize: 12, fontWeight: "700", color: "#111827" },

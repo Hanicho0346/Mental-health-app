@@ -1,4 +1,5 @@
 "use strict";
+// models/ChatMessage.ts
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     var desc = Object.getOwnPropertyDescriptor(m, k);
@@ -36,13 +37,53 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.ChatMessage = void 0;
 const mongoose_1 = __importStar(require("mongoose"));
 const chatMessageSchema = new mongoose_1.Schema({
-    from: { type: String, required: true },
-    to: { type: String, required: true },
-    type: { type: String, enum: ['text', 'voice'], default: 'text' },
-    content: { type: String, default: '' },
-    fileUrl: { type: String, default: '' },
-    timestamp: { type: Date, default: Date.now },
-    read: { type: Boolean, default: false },
+    conversation_id: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        ref: "Conversation",
+        required: true,
+        index: true,
+    },
+    from: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        ref: "User",
+        required: true,
+        index: true,
+    },
+    to: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        ref: "User",
+        required: true,
+        index: true,
+    },
+    type: {
+        type: String,
+        enum: ["text", "voice"],
+        default: "text",
+    },
+    content: {
+        type: String,
+        default: "",
+    },
+    fileUrl: {
+        type: String,
+        default: "",
+    },
+    timestamp: {
+        type: Date,
+        default: Date.now,
+    },
+    is_read: {
+        type: Boolean,
+        default: false,
+        index: true,
+    },
+    clientId: {
+        type: String,
+        default: null,
+    },
 });
-// Named differently from main Message model to avoid conflicts
-exports.ChatMessage = mongoose_1.default.model('ChatMessage', chatMessageSchema);
+chatMessageSchema.index({
+    conversation_id: 1,
+    timestamp: -1,
+});
+exports.ChatMessage = mongoose_1.default.model("ChatMessage", chatMessageSchema);

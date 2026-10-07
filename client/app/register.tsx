@@ -1,9 +1,10 @@
+import { shadowStyle } from "@/lib/shadow";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -16,7 +17,8 @@ import * as DocumentPicker from "expo-document-picker";
 import { resolvePostAuthRoute } from "@/lib/sessionRouting";
 import { api } from "@/lib/api";
 import { getApiErrorMessage, logClientError } from "@/lib/log";
-import { useAuthStore, type AuthUser } from "@/stores/authStore";
+import { showAlert } from "@/lib/showAlert";
+import { pickAuthUser, useAuthStore, type AuthUser } from "@/stores/authStore";
 type Role = "user" | "psychiatrist" | null;
 type Step = 1 | 2;
 
@@ -30,6 +32,7 @@ export default function RegisterScreen() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
   // Shared field
   const [nationalId, setNationalId] = useState("");
@@ -42,10 +45,14 @@ export default function RegisterScreen() {
   const [certificateUrl, setCertificateUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
 
+  function fail(title: string, message: string): void {
+    setFormError(message);
+    showAlert(title, message);
+  }
+
   // ── Certificate upload ──────────────────────────────────────────────────
   async function handleCertificateUpload(): Promise<void> {
     try {
-      // Try document picker first (supports PDF + images)
       const docResult = await DocumentPicker.getDocumentAsync({
         type: ["application/pdf", "image/jpeg", "image/png", "image/jpg"],
         copyToCacheDirectory: true,
@@ -55,27 +62,35 @@ export default function RegisterScreen() {
 
       const asset = docResult.assets[0];
       const formData = new FormData();
-      formData.append("file", {
-        uri: asset.uri,
-        name: asset.name ?? "certificate.pdf",
-        type: asset.mimeType ?? "application/pdf",
-      } as any);
-      formData.append("email", email.trim());
+
+      if (Platform.OS === "web") {
+        if ((asset as any).file instanceof File || (asset as any).file instanceof Blob) {
+          formData.append("file", (asset as any).file, asset.name ?? "certificate.pdf");
+        } else {
+          const res = await fetch(asset.uri);
+          const blob = await res.blob();
+          formData.append("file", blob, asset.name ?? "certificate.pdf");
+        }
+      } else {
+        formData.append("file", {
+          uri: asset.uri,
+          name: asset.name ?? "certificate.pdf",
+          type: asset.mimeType ?? "application/pdf",
+        } as any);
+      }
 
       setUploading(true);
+      setFormError(null);
       const { data } = await api.post<{ ok: boolean; url: string }>(
         "/auth/upload/certificate",
         formData,
-        { headers: { "Content-Type": "multipart/form-data" } },
+        Platform.OS === "web" ? undefined : { headers: { "Content-Type": "multipart/form-data" } },
       );
 
       setCertificateUrl(data.url);
       setCertificateUploaded(true);
-    } catch (e: any) {
-      Alert.alert(
-        "Upload failed",
-        e.message ?? "Could not upload certificate.",
-      );
+    } catch (e: unknown) {
+      fail("Upload failed", getApiErrorMessage(e));
     } finally {
       setUploading(false);
     }
@@ -83,24 +98,32 @@ export default function RegisterScreen() {
 
   async function handleRegister(): Promise<void> {
     if (submitting) return;
+    setFormError(null);
+
     if (!role) {
-      Alert.alert(
-        "Choose an account type",
-        "Please select user or psychiatrist.",
-      );
+      fail("Choose an account type", "Please select user or psychiatrist.");
       return;
     }
     if (!fullName.trim() || !email.trim() || !password) {
-      Alert.alert("Missing fields", "Please complete all required fields.");
+      fail("Missing fields", "Please complete all required fields.");
       return;
     }
     if (password.length < 8) {
-      Alert.alert("Weak password", "Password must be at least 8 characters.");
+      fail("Weak password", "Password must be at least 8 characters.");
       return;
     }
     if (!nationalId.trim()) {
-      Alert.alert("Missing field", "Please enter your National ID number.");
+      fail("Missing field", "Please enter your National ID number.");
       return;
+    }
+    if (role === "psychiatrist") {
+      if (!licenseNumber.trim() || !specialization.trim() || !experience.trim()) {
+        fail(
+          "Missing professional details",
+          "License, specialization, and years of experience are required.",
+        );
+        return;
+      }
     }
 
     setSubmitting(true);
@@ -113,7 +136,7 @@ export default function RegisterScreen() {
         | {
             accessToken: string;
             refreshToken: string;
-            user: AuthUser;
+            user: AuthUser | Record<string, unknown>;
           }
       >("/auth/register", {
         full_name: fullName.trim(),
@@ -138,19 +161,28 @@ export default function RegisterScreen() {
         return;
       }
 
+      const authData = data as { accessToken: string; refreshToken: string; user: Record<string, unknown> };
+      const user =
+        authData.user && typeof authData.user === "object"
+          ? pickAuthUser(authData.user)
+          : null;
+
+      if (!authData.accessToken || !user?.id) {
+        fail("Registration failed", "Server returned an incomplete session.");
+        return;
+      }
+
       setSession({
-        accessToken: String(data.accessToken),
-        refreshToken: String(data.refreshToken),
-        user: data.user,
+        accessToken: String(authData.accessToken),
+        refreshToken: String(authData.refreshToken ?? ""),
+        user,
       });
 
-      requestAnimationFrame(() => {
-        router.replace(resolvePostAuthRoute(data.user));
-      });
+      const nextRoute = resolvePostAuthRoute(user);
+      router.replace(nextRoute as any);
     } catch (e: unknown) {
       logClientError("register.handleRegister", e);
-      const msg = getApiErrorMessage(e);
-      Alert.alert("Registration failed", msg);
+      fail("Registration failed", getApiErrorMessage(e));
     } finally {
       setSubmitting(false);
     }
@@ -238,7 +270,11 @@ export default function RegisterScreen() {
         <View style={{ width: 24 }} />
       </View>
 
-      <ScrollView style={s.scroll}>
+      <ScrollView
+        style={s.scroll}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{ paddingBottom: 40 }}
+      >
         <View style={s.logoSection}>
           <View style={s.iconCircle}>
             <Feather
@@ -256,6 +292,13 @@ export default function RegisterScreen() {
             {role === "psychiatrist" ? "እንደ ባለሙያ ይመዝገቡ" : "ሰላምማይንድን ይቀላቀሉ"}
           </Text>
         </View>
+
+        {formError ? (
+          <View style={s.errorBox}>
+            <Feather name="alert-circle" size={16} color="#B91C1C" />
+            <Text style={s.errorText}>{formError}</Text>
+          </View>
+        ) : null}
 
         <View style={s.formCard}>
           {/* ── Basic Info (all roles) ── */}
@@ -422,9 +465,11 @@ export default function RegisterScreen() {
         </View>
 
         <TouchableOpacity
-          style={s.continueButton}
+          style={[s.continueButton, submitting && { opacity: 0.7 }]}
           onPress={() => void handleRegister()}
           disabled={submitting}
+          accessibilityRole="button"
+          accessibilityLabel="Create Account"
         >
           {submitting ? (
             <ActivityIndicator color="#111827" />
@@ -466,11 +511,7 @@ const s = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     marginBottom: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
-    elevation: 2,
+    ...shadowStyle({ color: "#000", offset: { width: 0, height: 2 }, opacity: 0.05, radius: 10, elevation: 2 }),
     borderWidth: 1,
     borderColor: "#F3F4F6",
   },
@@ -512,11 +553,7 @@ const s = StyleSheet.create({
     backgroundColor: "#FFFFFF",
     borderRadius: 24,
     padding: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 15,
-    elevation: 2,
+    ...shadowStyle({ color: "#000", offset: { width: 0, height: 2 }, opacity: 0.05, radius: 15, elevation: 2 }),
   },
   sectionTitle: {
     fontSize: 16,
@@ -568,6 +605,18 @@ const s = StyleSheet.create({
     marginTop: 10,
   },
   infoText: { fontSize: 12, color: "#4B5563", lineHeight: 18, flex: 1 },
+  errorBox: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+    backgroundColor: "#FEF2F2",
+    borderWidth: 1,
+    borderColor: "#FECACA",
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 16,
+  },
+  errorText: { flex: 1, fontSize: 13, color: "#B91C1C", lineHeight: 18 },
   continueButton: {
     backgroundColor: "#4ADE80",
     borderRadius: 16,

@@ -1,3 +1,4 @@
+import { shadowStyle } from "@/lib/shadow";
 import { api } from '@/lib/api';
 import { getApiErrorMessage, logClientError } from '@/lib/log';
 import { Feather } from '@expo/vector-icons';
@@ -240,7 +241,7 @@ const s = StyleSheet.create({
   revenueCard: {
     borderRadius: 24, padding: 28, backgroundColor: '#1E40AF',
     marginBottom: 16,
-    shadowColor: '#1E40AF', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.3, shadowRadius: 12, elevation: 8,
+    ...shadowStyle({ color: '#1E40AF', offset: { width: 0, height: 6 }, opacity: 0.3, radius: 12, elevation: 8 }),
   },
   revenueLabel: { fontSize: 14, color: 'rgba(255,255,255,0.8)', marginBottom: 8 },
   revenueAmount: { fontSize: 38, fontWeight: '800', color: '#FFFFFF', marginBottom: 6 },
@@ -250,7 +251,7 @@ const s = StyleSheet.create({
   statCard: {
     flex: 1, backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16,
     borderLeftWidth: 4,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 4, elevation: 2,
+    ...shadowStyle({ color: '#000', offset: { width: 0, height: 1 }, opacity: 0.04, radius: 4, elevation: 2 }),
   },
   statLabel: { fontSize: 12, color: '#6B7280', marginBottom: 6 },
   statValue: { fontSize: 20, fontWeight: '800' },
@@ -266,7 +267,7 @@ const s = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: '#FFFFFF', marginHorizontal: 16, marginBottom: 10,
     borderRadius: 14, padding: 14,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 4, elevation: 1,
+    ...shadowStyle({ color: '#000', offset: { width: 0, height: 1 }, opacity: 0.04, radius: 4, elevation: 1 }),
   },
   rowLeft: { flex: 1 },
   rowTitle: { fontSize: 14, fontWeight: '700', color: '#111827' },

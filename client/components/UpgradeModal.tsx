@@ -17,11 +17,13 @@ import { api } from '@/lib/api';
 import { getApiErrorMessage } from '@/lib/log';
 import { Feather } from '@expo/vector-icons';
 import * as Linking from 'expo-linking';
+import { router } from 'expo-router';
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Modal,
+  Platform,
   StyleSheet,
   Text,
   TextInput,
@@ -57,30 +59,47 @@ export function UpgradeModal({ visible, onClose, onSuccess }: Props) {
         '/subscriptions/premier/initiate'
       );
 console.log("INITIATE RESPONSE:", res.data);
-      const { checkout_url } = res.data;
+      const { checkout_url, tx_ref } = res.data;
 console.log("CHECKOUT URL:", checkout_url);
       if (!checkout_url) {
         Alert.alert('Error', 'No checkout URL returned. Please try again.');
         return;
       }
 
-      // Close the modal BEFORE opening the browser so there's no UI stack issue
+      // Close the modal BEFORE navigating/opening the browser
       onClose();
+      await AsyncStorage.setItem('pendingSubscriptionTxRef', tx_ref);
 
-      // Use Linking.openURL (not WebBrowser) — this hands off to the system
-      // browser and immediately returns, leaving the JS bridge free to receive
-      // the deep-link redirect when Chapa sends the user back.
+      // On web: deep-link schemes (mental-health-mobile://) aren't supported
+      // by browsers. Parse the tx_ref and navigate internally via expo-router.
+      if (Platform.OS === 'web') {
+        // Extract tx_ref from the checkout URL (works for both mock and real Chapa)
+        let txRefParam = tx_ref;
+        try {
+          // For mock: checkout_url IS the return URL with tx_ref as a query param
+          const parsed = new URL(checkout_url.replace(/^[a-z][a-z0-9+\-.]*:\/\//i, 'http://x/'));
+          txRefParam = parsed.searchParams.get('tx_ref') ?? tx_ref;
+        } catch { /* use tx_ref from response body */ }
+
+        // For real Chapa on web: open checkout URL in the same tab so the
+        // browser can redirect back to the web app's payment-return page.
+        if (checkout_url.startsWith('http://') || checkout_url.startsWith('https://')) {
+          window.location.href = checkout_url;
+          return;
+        }
+
+        // Dev mock: navigate directly to the payment-return screen
+        router.push(`/(tabs)/(user-tabs)/payment-return?tx_ref=${encodeURIComponent(txRefParam)}`);
+        return;
+      }
+
+      // Mobile: use system deep-link via Linking
       const canOpen = await Linking.canOpenURL(checkout_url);
       if (!canOpen) {
         Alert.alert('Cannot open browser', 'Please visit: ' + checkout_url);
         return;
       }
-
-      await AsyncStorage.setItem('pendingSubscriptionTxRef', res.data.tx_ref);
       await Linking.openURL(checkout_url);
-      // → user completes payment in browser
-      // → Chapa redirects to selamind://payment-return?tx_ref=...
-      // → app/payment-return.tsx takes over
 
     } catch (e: unknown) {
       Alert.alert('Could not start payment', getApiErrorMessage(e));

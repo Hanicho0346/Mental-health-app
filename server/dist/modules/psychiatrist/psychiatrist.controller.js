@@ -6,13 +6,14 @@ const WalletTransaction_js_1 = require("../../models/WalletTransaction.js");
 const psychiatrist_service_js_1 = require("./psychiatrist.service.js");
 const AppError_js_1 = require("../../utils/AppError.js");
 const User_js_1 = require("../../models/User.js");
+const logger_js_1 = require("../../utils/logger.js");
 const getVerificationStatus = async (req, res, next) => {
     try {
-        if (!req.userId) {
+        if (!req.userId || !req.userObjectId) {
             res.status(401).json({ error: 'Unauthorized' });
             return;
         }
-        const status = await (0, psychiatrist_service_js_1.getPsychiatristVerificationStatus)(req.userId);
+        const status = await (0, psychiatrist_service_js_1.getPsychiatristVerificationStatus)(req.userObjectId.toString());
         res.json(status);
     }
     catch (err) {
@@ -31,8 +32,8 @@ const getFullProfile = async (req, res, next) => {
             res.status(401).json({ error: 'Unauthorized' });
             return;
         }
-        // Get user data
-        const user = await User_js_1.User.findOne({ clerk_id: req.userId })
+        // Get user data by MongoDB _id (req.userId)
+        const user = await User_js_1.User.findById(req.userId)
             .select('-password')
             .lean();
         if (!user) {
@@ -44,7 +45,6 @@ const getFullProfile = async (req, res, next) => {
         // Combine and return full profile
         res.json({
             id: user._id,
-            clerk_id: user.clerk_id,
             email: user.email,
             full_name: user.full_name,
             role: user.role,
@@ -93,8 +93,11 @@ const uploadDocument = async (req, res, next) => {
         if (!file) {
             throw new AppError_js_1.AppError(400, 'Document file is required');
         }
-        // Get document type from validated body
-        const documentType = (req.body.document_type ?? 'other');
+        // Get document type from body (support both snake_case and camelCase)
+        const rawType = req.body.document_type ?? req.body.documentType ?? 'other';
+        const documentType = (['license', 'national_id', 'certificate', 'other'].includes(rawType)
+            ? rawType
+            : 'other');
         const doc = await (0, psychiatrist_service_js_1.uploadPsychiatristDocument)(req.userId, file, documentType);
         res.status(201).json({
             success: true,
@@ -113,16 +116,8 @@ exports.uploadDocument = uploadDocument;
  */
 const getPsychiatristWallet = async (req, res) => {
     try {
-        const clerkId = req.userId;
-        if (!clerkId) {
-            res.status(401).json({
-                error: 'Unauthorized',
-            });
-            return;
-        }
-        const user = await User_js_1.User.findOne({
-            clerk_id: clerkId,
-        });
+        const userId = req.userObjectId;
+        const user = await User_js_1.User.findById(userId);
         if (!user) {
             res.status(404).json({
                 error: 'User not found',
@@ -175,7 +170,7 @@ const getPsychiatristWallet = async (req, res) => {
         });
     }
     catch (err) {
-        console.error('Error in getPsychiatristWallet:', err);
+        (0, logger_js_1.logServerError)('getPsychiatristWallet', err);
         res.status(500).json({
             error: 'Failed to fetch wallet balance',
         });
@@ -188,16 +183,8 @@ exports.getPsychiatristWallet = getPsychiatristWallet;
  */
 const getPsychiatristTransactions = async (req, res) => {
     try {
-        const clerkId = req.userId;
-        if (!clerkId) {
-            res.status(401).json({
-                error: 'Unauthorized',
-            });
-            return;
-        }
-        const user = await User_js_1.User.findOne({
-            clerk_id: clerkId,
-        });
+        const userId = req.userObjectId;
+        const user = await User_js_1.User.findById(userId);
         if (!user) {
             res.status(404).json({
                 error: 'User not found',
@@ -273,7 +260,7 @@ const getPsychiatristTransactions = async (req, res) => {
         });
     }
     catch (err) {
-        console.error('Error in getPsychiatristTransactions:', err);
+        (0, logger_js_1.logServerError)('getPsychiatristTransactions', err);
         res.status(500).json({
             error: 'Failed to fetch transaction history',
         });
@@ -286,16 +273,14 @@ exports.getPsychiatristTransactions = getPsychiatristTransactions;
  */
 const getPsychiatristStats = async (req, res) => {
     try {
-        const clerkId = req.userId;
-        if (!clerkId) {
+        const userId = req.userId;
+        if (!userId) {
             res.status(401).json({
                 error: 'Unauthorized',
             });
             return;
         }
-        const user = await User_js_1.User.findOne({
-            clerk_id: clerkId,
-        });
+        const user = await User_js_1.User.findById(userId);
         if (!user) {
             res.status(404).json({
                 error: 'User not found',
@@ -347,7 +332,7 @@ const getPsychiatristStats = async (req, res) => {
         });
     }
     catch (err) {
-        console.error('Error in getPsychiatristStats:', err);
+        (0, logger_js_1.logServerError)('getPsychiatristStats', err);
         res.status(500).json({
             error: 'Failed to fetch statistics',
         });

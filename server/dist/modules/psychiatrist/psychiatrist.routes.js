@@ -14,5 +14,5 @@ router.get('/profile', psychiatrist_controller_js_1.getFullProfile);
 router.get('/wallet', psychiatrist_controller_js_1.getPsychiatristWallet);
 router.get('/wallet/transactions', psychiatrist_controller_js_1.getPsychiatristTransactions);
 router.post('/verification/submit', (0, validateRequest_js_1.validateBody)(psychiatrist_schemas_js_1.psychiatristProfileUpdateSchema), psychiatrist_controller_js_1.submitVerification);
-router.post('/verification/documents', multer_config_js_1.memoryUpload.single('document'), (0, validateRequest_js_1.validateBody)(psychiatrist_schemas_js_1.psychiatristVerificationSchema), psychiatrist_controller_js_1.uploadDocument);
+router.post(['/verification/documents', '/upload-document'], multer_config_js_1.memoryUpload.single('document'), psychiatrist_controller_js_1.uploadDocument);
 exports.default = router;

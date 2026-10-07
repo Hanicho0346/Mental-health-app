@@ -18,9 +18,8 @@ router.get('/wallet', getPsychiatristWallet);
 router.get('/wallet/transactions', getPsychiatristTransactions); 
 router.post('/verification/submit', validateBody(psychiatristProfileUpdateSchema), submitVerification);
 router.post(
-  '/verification/documents',
+  ['/verification/documents', '/upload-document'],
   memoryUpload.single('document'),
-  validateBody(psychiatristVerificationSchema),
   uploadDocument
 );
 

@@ -1,8 +1,8 @@
+import { shadowStyle } from "@/lib/shadow";
 /**
  * app/admin/index.tsx
  *
  * Admin dashboard — 4 tabs: Dashboard, Psychiatrists, Users, Profile.
- * Uses Clerk for auth/session management.
  *
  * API endpoints:
  *   GET   /admin/stats
@@ -20,7 +20,6 @@
 import { api } from "@/lib/api";
 import { getApiErrorMessage, logClientError } from "@/lib/log";
 import { useAuthStore } from "@/stores/authStore";
-import { useClerk } from "@clerk/clerk-expo";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
@@ -272,11 +271,7 @@ const sc = StyleSheet.create({
     borderRadius: 18,
     padding: 18,
     marginHorizontal: 5,
-    shadowColor: C.gray900,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 3,
+    ...shadowStyle({ color: C.gray900, offset: { width: 0, height: 4 }, opacity: 0.08, radius: 12, elevation: 3 }),
   },
   iconCircle: {
     width: 42,
@@ -917,11 +912,7 @@ const ps = StyleSheet.create({
     borderRadius: 18,
     padding: 16,
     marginBottom: 14,
-    shadowColor: C.gray900,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 2,
+    ...shadowStyle({ color: C.gray900, offset: { width: 0, height: 2 }, opacity: 0.06, radius: 8, elevation: 2 }),
   },
   cardHeader: { flexDirection: "row", alignItems: "center", marginBottom: 12 },
   avatar: {
@@ -1171,11 +1162,7 @@ const us = StyleSheet.create({
     borderRadius: 16,
     padding: 14,
     marginBottom: 10,
-    shadowColor: C.gray900,
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 1,
+    ...shadowStyle({ color: C.gray900, offset: { width: 0, height: 1 }, opacity: 0.04, radius: 4, elevation: 1 }),
   },
   avatar: {
     width: 44,
@@ -1197,9 +1184,6 @@ const us = StyleSheet.create({
 function ProfileTab() {
   const user = useAuthStore((s) => s.user);
   const clearSession = useAuthStore((s) => s.clearSession);
-
-  // Clerk sign out
-  const { signOut } = useClerk();
 
   // Edit profile
   const [fullName, setFullName] = useState(user?.full_name ?? "");
@@ -1313,26 +1297,21 @@ function ProfileTab() {
     }
   }
 
-  // ── Clerk-aware logout ──
   function handleLogout() {
+    const doLogout = async () => {
+      await clearSession();
+      router.replace("/login");
+    };
+    // On web, Alert.alert button callbacks are silent no-ops — use window.confirm instead
+    if (typeof window !== 'undefined' && typeof (window as any).confirm === 'function') {
+      if ((window as any).confirm('Are you sure you want to log out?')) {
+        void doLogout();
+      }
+      return;
+    }
     Alert.alert("Log out", "Are you sure you want to log out?", [
       { text: "Cancel", style: "cancel" },
-      {
-        text: "Log out",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            // 1. Sign out of Clerk (clears Clerk session + tokens)
-            await signOut();
-          } catch (_) {
-            // Clerk sign-out failed — proceed anyway
-          }
-          // 2. Clear local auth store
-          await clearSession();
-          // 3. Navigate to login
-          router.replace("/login");
-        },
-      },
+      { text: "Log out", style: "destructive", onPress: () => void doLogout() },
     ]);
   }
 
@@ -1985,11 +1964,7 @@ const pf = StyleSheet.create({
     marginBottom: 2,
     borderWidth: 1.5,
     borderColor: C.gray200,
-    shadowColor: C.gray900,
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 1,
+    ...shadowStyle({ color: C.gray900, offset: { width: 0, height: 1 }, opacity: 0.04, radius: 4, elevation: 1 }),
   },
   walletToggleLeft: { flexDirection: "row", alignItems: "center", gap: 12 },
   walletIcon: {
@@ -2039,11 +2014,7 @@ const pf = StyleSheet.create({
   },
   walletTabBtnActive: {
     backgroundColor: C.white,
-    shadowColor: C.gray900,
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
+    ...shadowStyle({ color: C.gray900, offset: { width: 0, height: 1 }, opacity: 0.05, radius: 2, elevation: 1 }),
   },
   walletTabTxt: {
     fontSize: 13,
@@ -2267,11 +2238,7 @@ const shared = StyleSheet.create({
     marginBottom: 16,
     borderWidth: 1,
     borderColor: C.gray200,
-    shadowColor: C.gray900,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 1,
+    ...shadowStyle({ color: C.gray900, offset: { width: 0, height: 2 }, opacity: 0.05, radius: 8, elevation: 1 }),
   },
   sectionHeaderRow: {
     flexDirection: "row",
@@ -2365,11 +2332,7 @@ const s = StyleSheet.create({
     borderTopColor: C.gray100,
     paddingBottom: 8,
     paddingTop: 6,
-    shadowColor: C.gray900,
-    shadowOffset: { width: 0, height: -3 },
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
-    elevation: 10,
+    ...shadowStyle({ color: C.gray900, offset: { width: 0, height: -3 }, opacity: 0.05, radius: 10, elevation: 10 }),
   },
   tabItem: { flex: 1, alignItems: "center", paddingVertical: 4 },
   tabIconWrap: {

@@ -37,7 +37,6 @@ const subscriptionSchema = new Schema(
   }
 );
 
-subscriptionSchema.index({ tx_ref: 1 });
 subscriptionSchema.index({ user_id: 1, tier: 1 });
 
 export type SubscriptionDocument = InferSchemaType<typeof subscriptionSchema> & { _id: mongoose.Types.ObjectId };

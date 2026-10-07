@@ -79,10 +79,7 @@ const baseEnvSchema = zod_1.z.object({
     SMTP_SECURE: boolFromEnv(false),
     SMTP_USER: zod_1.z.string().optional(),
     SMTP_PASS: zod_1.z.string().optional(),
-    EMAIL_FROM: zod_1.z
-        .string()
-        .email()
-        .optional(),
+    EMAIL_FROM: zod_1.z.preprocess((v) => (v === '' || v === null ? undefined : v), zod_1.z.string().email().optional()),
     CLOUDINARY_CLOUD_NAME: zod_1.z.string().optional(),
     CLOUDINARY_API_KEY: zod_1.z.string().optional(),
     CLOUDINARY_API_SECRET: zod_1.z.string().optional(),
@@ -106,10 +103,45 @@ const baseEnvSchema = zod_1.z.object({
         .int()
         .positive()
         .default(40),
-    CLERK_SECRET_KEY: zod_1.z
+    OTP_RATE_LIMIT_WINDOW_MS: zod_1.z.coerce
+        .number()
+        .int()
+        .positive()
+        .default(600_000),
+    OTP_RATE_LIMIT_MAX: zod_1.z.coerce
+        .number()
+        .int()
+        .positive()
+        .default(5),
+    REDIS_URL: zod_1.z
         .string()
         .min(1)
-        .optional(),
+        .default('redis://127.0.0.1:6379'),
+    RESEND_API_KEY: zod_1.z.string().optional(),
+    EMAIL_REPLY_TO: zod_1.z.preprocess((v) => (v === '' || v === null ? undefined : v), zod_1.z.string().email().optional()),
+    CLIENT_URL: zod_1.z.string().url().optional(),
+    SOCKET_CORS_ORIGINS: zod_1.z
+        .string()
+        .optional()
+        .transform((s) => s
+        ?.split(',')
+        .map((x) => x.trim())
+        .filter(Boolean)),
+    SOCKET_MESSAGE_RATE_LIMIT_WINDOW_MS: zod_1.z.coerce
+        .number()
+        .int()
+        .positive()
+        .default(60_000),
+    SOCKET_MESSAGE_RATE_LIMIT_MAX: zod_1.z.coerce
+        .number()
+        .int()
+        .positive()
+        .default(60),
+    SOCKET_MAX_CONNECTIONS_PER_USER: zod_1.z.coerce
+        .number()
+        .int()
+        .positive()
+        .default(3),
     ADMIN_BOOTSTRAP_EMAILS: zod_1.z
         .string()
         .optional()
@@ -118,9 +150,6 @@ const baseEnvSchema = zod_1.z.object({
         .map((x) => x.trim().toLowerCase())
         .filter(Boolean)),
     // ADMIN ENV VARIABLES
-    ADMIN_CLERK_ID: zod_1.z
-        .string()
-        .optional(),
     ADMIN_EMAIL: zod_1.z
         .string()
         .email()
@@ -146,6 +175,22 @@ function parseEnv(processEnv) {
         'production' &&
         !processEnv.JWT_REFRESH_SECRET) {
         throw new Error('JWT_REFRESH_SECRET is required in production');
+    }
+    if (d.NODE_ENV === 'production') {
+        if (!processEnv.REDIS_URL) {
+            throw new Error('REDIS_URL is required in production');
+        }
+        if (!processEnv.RESEND_API_KEY) {
+            throw new Error('RESEND_API_KEY is required in production');
+        }
+        if (!processEnv.EMAIL_FROM) {
+            throw new Error('EMAIL_FROM is required in production');
+        }
+        const socketOrigins = processEnv.SOCKET_CORS_ORIGINS?.split(',').map((x) => x.trim()).filter(Boolean) ?? [];
+        const httpOrigins = processEnv.CORS_ORIGINS?.split(',').map((x) => x.trim()).filter(Boolean) ?? [];
+        if (socketOrigins.length === 0 && httpOrigins.length === 0) {
+            throw new Error('SOCKET_CORS_ORIGINS or CORS_ORIGINS is required in production for browser Socket.IO clients');
+        }
     }
     assertMongoDbUriPath(d.MONGODB_URI);
     const otpPepper = d.OTP_PEPPER &&
@@ -183,11 +228,19 @@ function parseEnv(processEnv) {
         rateLimitMax: d.RATE_LIMIT_MAX,
         authRateLimitWindowMs: d.AUTH_RATE_LIMIT_WINDOW_MS,
         authRateLimitMax: d.AUTH_RATE_LIMIT_MAX,
-        clerkSecretKey: d.CLERK_SECRET_KEY,
+        otpRateLimitWindowMs: d.OTP_RATE_LIMIT_WINDOW_MS,
+        otpRateLimitMax: d.OTP_RATE_LIMIT_MAX,
+        redisUrl: d.REDIS_URL,
+        resendApiKey: d.RESEND_API_KEY,
+        emailReplyTo: d.EMAIL_REPLY_TO,
+        clientUrl: d.CLIENT_URL,
+        socketCorsOrigins: d.SOCKET_CORS_ORIGINS,
+        socketMessageRateLimitWindowMs: d.SOCKET_MESSAGE_RATE_LIMIT_WINDOW_MS,
+        socketMessageRateLimitMax: d.SOCKET_MESSAGE_RATE_LIMIT_MAX,
+        socketMaxConnectionsPerUser: d.SOCKET_MAX_CONNECTIONS_PER_USER,
         adminBootstrapEmails: d.ADMIN_BOOTSTRAP_EMAILS ??
             [],
         // ADMIN VALUES
-        adminClerkId: d.ADMIN_CLERK_ID,
         adminEmail: d.ADMIN_EMAIL,
         adminName: d.ADMIN_NAME,
     };

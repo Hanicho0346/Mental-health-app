@@ -1,3 +1,4 @@
+import { shadowStyle } from "@/lib/shadow";
 // app/(tabs)/(user-tabs)/ai-chat.tsx
 import { api } from "@/lib/api";
 import { getApiErrorMessage } from "@/lib/log";
@@ -404,11 +405,7 @@ const bubbleStyles = StyleSheet.create({
   aiBubble: {
     backgroundColor: "#FFFFFF",
     borderBottomLeftRadius: 4,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    elevation: 2,
+    ...shadowStyle({ color: "#000", offset: { width: 0, height: 1 }, opacity: 0.06, radius: 4, elevation: 2 }),
   },
   text: { fontSize: 15, lineHeight: 22 },
   userText: { color: "#FFFFFF" },

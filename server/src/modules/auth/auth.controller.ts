@@ -1,7 +1,8 @@
 import type { RequestHandler } from 'express';
-import { AppError } from '../../utils/AppError.js';
 import * as authService from './auth.service.js';
 import { User } from '../../models/User.js';
+import { AppError } from '../../utils/AppError.js';
+import { logServerError } from '../../utils/logger.js';
 
 function isDuplicateKeyError(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: number }).code === 11000;
@@ -163,55 +164,42 @@ export const updatePushToken: RequestHandler = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-export const uploadCertificate: RequestHandler = async (req, res, next) => {
+const CERT_MIME = new Set(['application/pdf', 'image/jpeg', 'image/png', 'image/jpg']);
+const MAX_CERT_BYTES = 10 * 1024 * 1024;
+
+export const uploadCertificate: RequestHandler = async (req, res) => {
   try {
     const file = req.file;
-
-    // ── Debug logs (remove after confirming upload works) ──
-    console.log('[uploadCertificate] req.file:', file
-      ? { fieldname: file.fieldname, originalname: file.originalname, mimetype: file.mimetype, size: file.size, hasBuffer: !!file.buffer }
-      : 'MISSING');
-    console.log('[uploadCertificate] req.body:', req.body);
-    console.log('[uploadCertificate] req.email:', req.email);
 
     if (!file) {
       res.status(400).json({ error: 'No file uploaded. Send field name: "file"' });
       return;
     }
 
-    // Guard: buffer missing means multer is using disk storage, not memory
     if (!file.buffer || file.buffer.length === 0) {
-      console.error('[uploadCertificate] file.buffer is empty — multer must use memoryStorage()');
       res.status(500).json({ error: 'Server misconfiguration: file buffer unavailable' });
       return;
     }
 
-    const allowed = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg'];
-    if (!allowed.includes(file.mimetype)) {
+    if (!CERT_MIME.has(file.mimetype)) {
       res.status(400).json({ error: 'Only PDF, JPG, and PNG are allowed' });
       return;
     }
 
-    if (file.size > 10 * 1024 * 1024) {
+    if (file.size > MAX_CERT_BYTES) {
       res.status(400).json({ error: 'File too large. Maximum 10 MB' });
       return;
     }
 
-    const email = req.email ?? (req.body as { email?: string })?.email ?? '';
-    if (!email) {
-      res.status(401).json({ error: 'Unauthorized' });
-      return;
-    }
-
     const result = await authService.uploadDocument({
-      email,
+      userId: req.userId,
       fileBuffer: file.buffer,
       mimeType: file.mimetype,
     });
 
     res.status(200).json(result);
   } catch (err) {
-    console.error('[uploadCertificate] unexpected error:', err);
+    logServerError('auth.uploadCertificate', err);
     handleAuthError(res, err, 'Certificate upload');
   }
 };

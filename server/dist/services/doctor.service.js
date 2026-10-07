@@ -3,28 +3,12 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-const promises_1 = __importDefault(require("fs/promises"));
 const cloudinary_1 = require("cloudinary");
 const mongoose_1 = __importDefault(require("mongoose"));
+const cloudinary_service_js_1 = require("./cloudinary.service.js");
+const env_js_1 = require("../config/env.js");
 const index_js_1 = __importDefault(require("../models/index.js"));
-cloudinary_1.v2.config({
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-    api_key: process.env.CLOUDINARY_API_KEY,
-    api_secret: process.env.CLOUDINARY_API_SECRET,
-});
-async function safeUnlinkTemp(filePath) {
-    if (!filePath)
-        return;
-    try {
-        await promises_1.default.unlink(filePath);
-    }
-    catch (err) {
-        const code = err && typeof err === 'object' && 'code' in err ? String(err.code) : '';
-        if (code !== 'ENOENT') {
-            console.warn('doctor.uploadVideoData: failed to remove temp upload', err);
-        }
-    }
-}
+(0, cloudinary_service_js_1.configureCloudinary)();
 function formatTimeAgo(date) {
     const seconds = Math.floor((Date.now() - new Date(date).getTime()) / 1000);
     const minutes = Math.floor(seconds / 60);
@@ -57,7 +41,7 @@ class DoctorService {
                 },
             }),
             index_js_1.default.Appointment.distinct('user_id', psychiatristFilter(doctorId)),
-            index_js_1.default.Message.countDocuments({
+            index_js_1.default.ChatMessage.countDocuments({
                 receiver_id: doctorOid,
                 is_read: { $ne: true },
             }),
@@ -167,38 +151,28 @@ class DoctorService {
             email: user.email,
         };
     }
-    async uploadVideoData(doctorId, videoData) {
-        const { title, amharicTitle, tag, file } = videoData;
-        if (!file?.path) {
-            throw new Error('Upload file path missing');
-        }
-        try {
-            const uploaded = await cloudinary_1.v2.uploader.upload_large(file.path, {
-                resource_type: 'video',
-                folder: 'psychiatry_support_videos',
-                chunk_size: 6000000,
-            });
-            if (!uploaded || typeof uploaded !== 'object' || !('secure_url' in uploaded)) {
-                throw new Error('Invalid Cloudinary upload response');
-            }
-            const videoUrl = String(uploaded.secure_url);
-            const docPayload = {
-                doctor_id: new mongoose_1.default.Types.ObjectId(doctorId),
-                title: title.trim() || 'Untitled',
-                amharic_title: amharicTitle.trim(),
-                category: tag.trim(),
-                video_url: videoUrl,
-            };
-            const newVideo = await index_js_1.default.Video.create(docPayload);
-            return newVideo.toObject();
-        }
-        catch (err) {
-            console.error('Cloudinary Upload Error Details:', err);
-            throw new Error(err instanceof Error ? err.message : 'Failed to upload video to Cloudinary');
-        }
-        finally {
-            await safeUnlinkTemp(file.path);
-        }
+    async generateUploadSignature() {
+        const folder = 'psychiatry_support_videos';
+        const timestamp = Math.round(Date.now() / 1000);
+        const signature = cloudinary_1.v2.utils.api_sign_request({ timestamp, folder }, env_js_1.env.cloudinary.apiSecret);
+        return {
+            signature,
+            timestamp,
+            cloudName: env_js_1.env.cloudinary.cloudName,
+            apiKey: env_js_1.env.cloudinary.apiKey,
+            folder,
+        };
+    }
+    async saveVideoRecord(doctorId, data) {
+        const newVideo = await index_js_1.default.Video.create({
+            doctor_id: new mongoose_1.default.Types.ObjectId(doctorId),
+            title: data.title.trim() || 'Untitled',
+            amharic_title: data.amharicTitle.trim(),
+            category: data.tag.trim(),
+            video_url: data.videoUrl,
+            public_id: data.publicId,
+        });
+        return newVideo.toObject();
     }
     async getSupportVideos() {
         const videos = await index_js_1.default.Video.find()
@@ -213,6 +187,25 @@ class DoctorService {
             video_url: video.video_url,
             createdAt: video.createdAt,
         }));
+    }
+    async incrementListen(videoId) {
+        return index_js_1.default.Video.findByIdAndUpdate(videoId, { $inc: { listens: 1 } }, { new: true });
+    }
+    async toggleFavorite(videoId, userId) {
+        const video = await index_js_1.default.Video.findById(videoId);
+        if (!video)
+            return null;
+        const favs = video.favorites ?? [];
+        const objId = new mongoose_1.default.Types.ObjectId(userId);
+        const alreadyFav = favs.some((f) => f.equals(objId));
+        if (alreadyFav) {
+            video.favorites = favs.filter((f) => !f.equals(objId));
+        }
+        else {
+            video.favorites.push(objId);
+        }
+        await video.save();
+        return { isFavorite: !alreadyFav };
     }
 }
 exports.default = new DoctorService();

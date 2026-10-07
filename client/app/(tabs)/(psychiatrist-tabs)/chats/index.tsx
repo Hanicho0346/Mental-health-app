@@ -1,9 +1,7 @@
 
-
-import { useAuth } from "@clerk/clerk-expo";
-import { Ionicons } from "@expo/vector-icons";
+import { Feather, Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { getStoredAuthToken } from "@/lib/auth";
 import {
   ActivityIndicator,
@@ -32,8 +30,6 @@ function getInitials(name: string): string {
 }
 
 export default function PsychiatristChatsLobby() {
-  const { getToken } = useAuth();
-
   const conversations     = useChatStore((s) => s.conversations);
   const loading           = useChatStore((s) => s.loading);
   const setPeer           = useChatStore((s) => s.setPeer);
@@ -42,12 +38,9 @@ export default function PsychiatristChatsLobby() {
   const [connected,  setConnected]  = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  // FIX-A: pass backend JWT so the server resolves the MongoDB _id correctly
   useEffect(() => {
     const load = async () => {
-      const token =
-        (await getStoredAuthToken()) ??
-        (await getToken({ template: "backend" }));
+      const token = await getStoredAuthToken();
       if (token) await loadConversations(token);
     };
     load();
@@ -93,12 +86,9 @@ export default function PsychiatristChatsLobby() {
     };
   }, []);
 
-  // FIX-C: backend template on refresh too (was already correct, kept explicit)
   const onRefresh = async () => {
     setRefreshing(true);
-    const token =
-      (await getStoredAuthToken()) ??
-      (await getToken({ template: "backend" }));
+    const token = await getStoredAuthToken();
     if (token && loadConversations) await loadConversations(token);
     setRefreshing(false);
   };
@@ -182,6 +172,13 @@ export default function PsychiatristChatsLobby() {
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Chats</Text>
           <View style={styles.headerActions}>
+            <TouchableOpacity
+              style={styles.groupLink}
+              onPress={() => router.push("/groupchats" as never)}
+            >
+              <Feather name="users" size={20} color="#2563eb" />
+              <Text style={styles.groupLinkText}>Groups</Text>
+            </TouchableOpacity>
             <View style={[styles.connectionDot, connected ? styles.dotOnline : styles.dotOffline]} />
           </View>
         </View>
@@ -201,6 +198,13 @@ export default function PsychiatristChatsLobby() {
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Chats</Text>
         <View style={styles.headerActions}>
+          <TouchableOpacity
+            style={styles.groupLink}
+            onPress={() => router.push("/groupchats" as never)}
+          >
+            <Feather name="users" size={20} color="#2563eb" />
+            <Text style={styles.groupLinkText}>Groups</Text>
+          </TouchableOpacity>
           <View style={[styles.connectionDot, connected ? styles.dotOnline : styles.dotOffline]} />
         </View>
       </View>
@@ -224,7 +228,9 @@ const styles = StyleSheet.create({
   loadingText:      { marginTop: 12, fontSize: 16, color: "#6b7280" },
   header:           { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "#f3f4f6" },
   headerTitle:      { flex: 1, fontSize: 28, fontWeight: "bold", color: "#111827" },
-  headerActions:    { flexDirection: "row", alignItems: "center", gap: 16 },
+  headerActions:    { flexDirection: "row", alignItems: "center", gap: 12 },
+  groupLink:        { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "#eff6ff", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 16 },
+  groupLinkText:    { fontSize: 13, fontWeight: "600", color: "#2563eb" },
   connectionDot:    { width: 10, height: 10, borderRadius: 5 },
   dotOnline:        { backgroundColor: "#22c55e" },
   dotOffline:       { backgroundColor: "#ef4444" },

@@ -77,7 +77,6 @@ const requireAuth = async (req, res, next) => {
 exports.requireAuth = requireAuth;
 /** Requires Clerk bearer only (for sync / bootstrap before internal JWT exists). */
 const requireClerkSession = async (req, res, next) => {
-    console.log('[requireClerkSession] hit, token present:', !!bearerToken(req));
     const token = bearerToken(req);
     if (!token) {
         res.status(401).json({ error: 'Missing Clerk session token' });

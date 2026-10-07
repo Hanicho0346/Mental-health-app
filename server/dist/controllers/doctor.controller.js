@@ -10,25 +10,14 @@ exports.getAppointmentsByDate = getAppointmentsByDate;
 exports.getSupportVideos = getSupportVideos;
 exports.getPatients = getPatients;
 exports.getPatientProfile = getPatientProfile;
-exports.uploadSupportVideo = uploadSupportVideo;
-const promises_1 = __importDefault(require("fs/promises"));
+exports.getCloudinarySignature = getCloudinarySignature;
+exports.saveVideoRecord = saveVideoRecord;
+exports.incrementVideoListen = incrementVideoListen;
+exports.toggleVideoFavorite = toggleVideoFavorite;
 const mongoose_1 = __importDefault(require("mongoose"));
 const doctor_service_js_1 = __importDefault(require("../services/doctor.service.js"));
 function unauthorized(res) {
     res.status(401).json({ message: 'Unauthorized' });
-}
-async function safeUnlinkVideoTemp(filePath) {
-    if (!filePath)
-        return;
-    try {
-        await promises_1.default.unlink(filePath);
-    }
-    catch (err) {
-        const code = err && typeof err === 'object' && 'code' in err ? String(err.code) : '';
-        if (code !== 'ENOENT') {
-            console.warn('doctor.upload: failed to remove temp upload', err);
-        }
-    }
 }
 async function getDashboardStats(req, res) {
     try {
@@ -111,9 +100,7 @@ async function getSupportVideos(req, res) {
     }
     catch (err) {
         console.error(err);
-        res.status(500).json({
-            message: 'Failed to fetch videos',
-        });
+        res.status(500).json({ message: 'Failed to fetch videos' });
     }
 }
 async function getPatients(req, res) {
@@ -153,36 +140,83 @@ async function getPatientProfile(req, res) {
         res.status(500).json({ message: 'Failed to fetch patient profile' });
     }
 }
-async function uploadSupportVideo(req, res) {
-    const videoFile = req.file;
+async function getCloudinarySignature(req, res) {
     if (!req.userId || !req.auth) {
         unauthorized(res);
-        await safeUnlinkVideoTemp(videoFile?.path);
         return;
     }
     try {
-        if (!videoFile) {
-            res.status(400).json({
-                message: 'No video file received by server. Check Multer.',
-            });
+        const signature = await doctor_service_js_1.default.generateUploadSignature();
+        res.status(200).json(signature);
+    }
+    catch (err) {
+        res.status(500).json({ message: 'Failed to generate upload signature' });
+    }
+}
+async function saveVideoRecord(req, res) {
+    if (!req.userId || !req.auth) {
+        unauthorized(res);
+        return;
+    }
+    try {
+        const { title, amharicTitle, tag, videoUrl, publicId } = req.body;
+        if (!videoUrl) {
+            res.status(400).json({ message: 'videoUrl is required' });
             return;
         }
-        const { title, amharicTitle, tag } = req.body;
-        const newVideo = await doctor_service_js_1.default.uploadVideoData(req.userId, {
-            title: typeof title === 'string' ? title : '',
-            amharicTitle: typeof amharicTitle === 'string' ? amharicTitle : '',
-            tag: typeof tag === 'string' ? tag : '',
-            file: videoFile,
+        const newVideo = await doctor_service_js_1.default.saveVideoRecord(req.userId, {
+            title: title ?? '',
+            amharicTitle: amharicTitle ?? '',
+            tag: tag ?? '',
+            videoUrl,
+            publicId,
         });
-        res.status(201).json({
-            message: 'Video uploaded successfully',
-            video: newVideo,
-        });
+        res.status(201).json({ message: 'Video saved successfully', video: newVideo });
     }
     catch (err) {
         console.error('Controller Error:', err);
-        res.status(500).json({
-            message: err instanceof Error ? err.message : 'Failed to upload video',
-        });
+        res.status(500).json({ message: err instanceof Error ? err.message : 'Failed to save video' });
+    }
+}
+async function incrementVideoListen(req, res) {
+    try {
+        const { id } = req.params;
+        if (!mongoose_1.default.Types.ObjectId.isValid(id)) {
+            res.status(400).json({ message: 'Invalid video id' });
+            return;
+        }
+        const video = await doctor_service_js_1.default.incrementListen(id);
+        if (!video) {
+            res.status(404).json({ error: 'Not found' });
+            return;
+        }
+        res.status(200).json({ listens: video.listens });
+    }
+    catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Failed to update listen count' });
+    }
+}
+async function toggleVideoFavorite(req, res) {
+    try {
+        if (!req.userId || !req.auth) {
+            unauthorized(res);
+            return;
+        }
+        const { id } = req.params;
+        if (!mongoose_1.default.Types.ObjectId.isValid(id)) {
+            res.status(400).json({ message: 'Invalid video id' });
+            return;
+        }
+        const result = await doctor_service_js_1.default.toggleFavorite(id, req.userId);
+        if (!result) {
+            res.status(404).json({ error: 'Not found' });
+            return;
+        }
+        res.status(200).json({ isFavorite: result.isFavorite });
+    }
+    catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Failed to toggle favorite' });
     }
 }

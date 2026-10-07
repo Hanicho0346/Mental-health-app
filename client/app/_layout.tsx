@@ -1,5 +1,3 @@
-import { ClerkProvider, useAuth } from "@clerk/clerk-expo";
-import * as SecureStore from "expo-secure-store";
 import {
   DarkTheme,
   DefaultTheme,
@@ -9,98 +7,33 @@ import { Stack, router, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Text, View } from "react-native";
+import { ActivityIndicator, Platform, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
 
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { useAuthHydrated } from "@/lib/auth";
 import { useAuthStore } from "@/stores/authStore";
 import { useIconFonts } from "@/lib/loadIconFonts";
-import {
-  registerPushToken,
-  savePushTokenToBackend,
-} from "@/lib/notifications";
-import { getSocket } from "@/lib/socket";
+import { getSocket, disconnectSocket } from "@/lib/socket";
 import { logClientError } from "@/lib/log";
+
+import { resolvePostAuthRoute } from "@/lib/sessionRouting";
 
 SplashScreen.preventAutoHideAsync();
 
-function getClerkPublishableKey(): string | null {
-  const values = [
-    process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY,
-    process.env.CLERK_PUBLISHABLE_KEY,
-    (Constants.expoConfig as any)?.extra?.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY,
-    (Constants.expoConfig as any)?.extra?.CLERK_PUBLISHABLE_KEY,
-    (Constants.manifest as any)?.extra?.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY,
-    (Constants.manifest as any)?.extra?.CLERK_PUBLISHABLE_KEY,
-  ];
-
-  for (const value of values) {
-    if (typeof value === 'string' && value.trim().length > 0) {
-      return value.trim();
-    }
-  }
-
-  return null;
-}
-
-const publishableKey = getClerkPublishableKey();
-const isExpoGo = Constants.appOwnership === 'expo';
-// Secure token cache for Clerk
-// ─────────────────────────────────────────────────────────────
-
-const tokenCache = {
-  async getToken(key: string) {
-    try {
-      return await SecureStore.getItemAsync(key);
-    } catch {
-      return null;
-    }
-  },
-
-  async saveToken(key: string, value: string) {
-    try {
-      return await SecureStore.setItemAsync(key, value);
-    } catch {
-      return;
-    }
-  },
-
-  async clearToken(key: string) {
-    try {
-      return await SecureStore.deleteItemAsync(key);
-    } catch {
-      return;
-    }
-  },
-};
-
-// ─────────────────────────────────────────────────────────────
-// Root Navigation
-// ─────────────────────────────────────────────────────────────
+const isExpoGo = Constants.appOwnership === "expo";
 
 function RootNavigation() {
-  const { isLoaded, isSignedIn } = useAuth();
-
   const segments = useSegments();
-
   const colorScheme = useColorScheme();
-
   const { fontsReady, fontError } = useIconFonts();
-
   const [navigationReady, setNavigationReady] = useState(false);
-
   const authHydrated = useAuthHydrated();
-
   const accessToken = useAuthStore((s) => s.accessToken);
-
+  const user = useAuthStore((s) => s.user);
   const hasNavigated = useRef(false);
-
-  // ─────────────────────────────────────────────────────────
-  // Hide splash screen when fonts are ready
-  // ─────────────────────────────────────────────────────────
+  const wasAuthenticated = useRef(false);
 
   useEffect(() => {
     if (fontsReady || fontError) {
@@ -108,148 +41,104 @@ function RootNavigation() {
     }
   }, [fontsReady, fontError]);
 
-  // ─────────────────────────────────────────────────────────
-  // Small delay before navigation
-  // ─────────────────────────────────────────────────────────
-
   useEffect(() => {
     const timer = setTimeout(() => {
       setNavigationReady(true);
     }, 100);
-
     return () => clearTimeout(timer);
   }, []);
 
-  // ─────────────────────────────────────────────────────────
-  // Clear stale local session
-  // ─────────────────────────────────────────────────────────
-
-  // NOTE: Backend auth can coexist with Clerk in this app.
-  // Do not clear a valid backend session just because Clerk is not signed in.
-
-  // ─────────────────────────────────────────────────────────
-  // Auto navigation after login
-  // ─────────────────────────────────────────────────────────
-
   useEffect(() => {
-    if (
-      !isLoaded ||
-      !authHydrated ||
-      !navigationReady ||
-      !fontsReady ||
-      hasNavigated.current
-    ) {
+    if (!authHydrated || !navigationReady || !fontsReady || hasNavigated.current) {
       return;
     }
 
     const routeName = segments[0] ?? "index";
-
     const isAuthRoute =
       routeName === "login" ||
       routeName === "register" ||
       routeName === "verify-email";
+    const isRootRoute = (segments as string[]).length === 0;
 
-    const isRootRoute = segments.length === 0;
-
-    if ((isSignedIn || accessToken) && (isAuthRoute || isRootRoute)) {
+    if (accessToken && (isAuthRoute || isRootRoute)) {
       hasNavigated.current = true;
-
-      router.replace("/(tabs)");
+      const targetRoute = resolvePostAuthRoute(user);
+      router.replace(targetRoute as any);
     }
-  }, [
-    isLoaded,
-    isSignedIn,
-    segments,
-    authHydrated,
-    navigationReady,
-    fontsReady,
-  ]);
+  }, [segments, authHydrated, navigationReady, fontsReady, accessToken, user]);
 
-  // ─────────────────────────────────────────────────────────
-  // Push notification setup
-  // Disabled in Expo Go
-  // ─────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!authHydrated || !navigationReady || !fontsReady) return;
+    if (accessToken) {
+      wasAuthenticated.current = true;
+    } else if (wasAuthenticated.current && !accessToken) {
+      wasAuthenticated.current = false;
+      const routeName = segments[0] ?? "index";
+      const isAuthRoute =
+        routeName === "login" ||
+        routeName === "register" ||
+        routeName === "verify-email";
+      if (!isAuthRoute) {
+        router.replace("/login" as never);
+      }
+    }
+  }, [segments, authHydrated, navigationReady, fontsReady, accessToken]);
 
   useEffect(() => {
     if (!accessToken) return;
-
-    // Expo Go does not support remote push notifications
-    const isExpoGo = Constants.appOwnership === "expo";
-
-    if (isExpoGo) {
-      console.log(
-        "[Notifications] Push notifications skipped in Expo Go"
-      );
+    if (isExpoGo || Platform.OS === "web") {
       return;
     }
 
-    registerPushToken()
-      .then((token) => {
-        if (token) {
-          return savePushTokenToBackend(token);
-        }
-      })
-      .catch((err) => {
-        logClientError("pushTokenSetup", err);
-      });
+    (async () => {
+      const { registerPushToken, savePushTokenToBackend } = await import(
+        "@/lib/notifications"
+      );
+      const token = await registerPushToken();
+      if (token) {
+        await savePushTokenToBackend(token);
+      }
+    })().catch((err) => {
+      logClientError("pushTokenSetup", err);
+    });
   }, [accessToken]);
 
-  // ─────────────────────────────────────────────────────────
-  // Notification tap handling
-  // ─────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (isExpoGo || Platform.OS === "web") {
+      return;
+    }
 
-  // ─────────────────────────────────────────────────────────
-// Notification tap handling
-// ─────────────────────────────────────────────────────────
+    let sub: { remove?: () => void } | undefined;
 
-useEffect(() => {
-  if (isExpoGo) {
-    console.log(
-      "[Notifications] Notification listeners skipped in Expo Go"
-    );
-    return;
-  }
-
-  let sub: any;
-
-  (async () => {
-    const Notifications = await import("expo-notifications");
-
-    sub =
-      Notifications.addNotificationResponseReceivedListener(
-        (response) => {
-          const data = response.notification.request.content
-            .data as Record<string, string>;
-
-          try {
-            if (data.chat_id) {
-              router.push(`/chats/${data.chat_id}` as any);
-            } else if (data.booking_id) {
-              router.push(`/bookings/${data.booking_id}` as any);
-            } else if (data.psychiatrist_id) {
-              router.push("/(admin)" as any);
-            }
-          } catch (err) {
-            logClientError("notificationTap", err);
+    (async () => {
+      const Notifications = await import("expo-notifications");
+      sub = Notifications.addNotificationResponseReceivedListener((response) => {
+        const data = response.notification.request.content.data as Record<
+          string,
+          string
+        >;
+        try {
+          if (data.chat_id) {
+            router.push(`/chats/${data.chat_id}` as never);
+          } else if (data.booking_id) {
+            router.push(`/bookings/${data.booking_id}` as never);
+          } else if (data.psychiatrist_id) {
+            router.push("/(admin)" as never);
           }
+        } catch (err) {
+          logClientError("notificationTap", err);
         }
-      );
-  })();
+      });
+    })();
 
-  return () => {
-    sub?.remove?.();
-  };
-}, []);
-
-  // ─────────────────────────────────────────────────────────
-  // Real-time notification socket listener
-  // ─────────────────────────────────────────────────────────
+    return () => {
+      sub?.remove?.();
+    };
+  }, []);
 
   useEffect(() => {
     if (!accessToken) return;
-
     const socket = getSocket();
-
     if (!socket) return;
 
     const handleNotification = () => {
@@ -257,17 +146,17 @@ useEffect(() => {
     };
 
     socket.on("notification:new", handleNotification);
-
     return () => {
       socket.off("notification:new", handleNotification);
     };
   }, [accessToken]);
 
-  // ─────────────────────────────────────────────────────────
-  // Loading screen
-  // ─────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (accessToken) return;
+    disconnectSocket();
+  }, [accessToken]);
 
-  if (!fontsReady || !isLoaded || !navigationReady || !authHydrated) {
+  if (!fontsReady || !navigationReady || !authHydrated) {
     return (
       <View
         style={{
@@ -281,47 +170,16 @@ useEffect(() => {
     );
   }
 
-  // ─────────────────────────────────────────────────────────
-  // Main App
-  // ─────────────────────────────────────────────────────────
-
   return (
     <SafeAreaProvider>
-      <ThemeProvider
-        value={colorScheme === "dark" ? DarkTheme : DefaultTheme}
-      >
+      <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
         <Stack screenOptions={{ headerShown: false }} />
-
         <StatusBar style="auto" />
       </ThemeProvider>
     </SafeAreaProvider>
   );
 }
 
-// ─────────────────────────────────────────────────────────────
-// Root Layout
-// ─────────────────────────────────────────────────────────────
-
 export default function RootLayout() {
-  if (!publishableKey) {
-    return (
-      <SafeAreaView style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 }}>
-        <Text style={{ fontSize: 18, fontWeight: '700', marginBottom: 12, textAlign: 'center' }}>
-          Clerk is not configured.
-        </Text>
-        <Text style={{ fontSize: 14, color: '#6B7280', textAlign: 'center' }}>
-          Set EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY in your build environment or Expo extra config.
-        </Text>
-      </SafeAreaView>
-    );
-  }
-
-  return (
-    <ClerkProvider
-      publishableKey={publishableKey}
-      tokenCache={tokenCache}
-    >
-      <RootNavigation />
-    </ClerkProvider>
-  );
+  return <RootNavigation />;
 }
