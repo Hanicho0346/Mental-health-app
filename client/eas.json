@@ -38,6 +38,8 @@
     }
   },
   "submit": {
+    "development": {},
+    "preview": {},
     "production": {}
   }
 }
