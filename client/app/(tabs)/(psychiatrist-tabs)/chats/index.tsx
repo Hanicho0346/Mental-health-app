@@ -211,7 +211,7 @@ export default function PsychiatristChatsLobby() {
 
       <FlatList
         data={conversations}
-        keyExtractor={(item, index) =>
+        keyExtractor={(item: any, index) =>
           item?.peerId || item?._id || index.toString()
         }
         renderItem={renderChatItem}

@@ -3,6 +3,7 @@ import { shadowStyle } from "@/lib/shadow";
 import { api } from "@/lib/api";
 import { getApiErrorMessage } from "@/lib/log";
 import { Feather } from "@expo/vector-icons";
+import { router } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -268,6 +269,20 @@ export default function AIChatScreen() {
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
+          <TouchableOpacity
+            style={styles.backBtn}
+            onPress={() => {
+              if (router.canGoBack()) {
+                router.back();
+              } else {
+                router.replace("/(tabs)/(user-tabs)/home");
+              }
+            }}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          >
+            <Feather name="chevron-left" size={26} color="#1F2937" />
+          </TouchableOpacity>
+
           <View style={styles.drAvatar}>
             <Text style={styles.drAvatarText}>Dr</Text>
             <View style={styles.onlineDot} />
@@ -457,7 +472,13 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#F3F4F6",
   },
-  headerLeft: { flexDirection: "row", alignItems: "center", gap: 12 },
+  headerLeft: { flexDirection: "row", alignItems: "center", gap: 8 },
+  backBtn: {
+    paddingRight: 4,
+    paddingVertical: 4,
+    justifyContent: "center",
+    alignItems: "center",
+  },
   drAvatar: {
     width: 44,
     height: 44,

@@ -32,7 +32,15 @@ type Message = {
 };
 
 export default function PsychiatristDirectChatScreen() {
-  const { peer: peerId } = useLocalSearchParams<{ peer: string }>();
+  const {
+    peer: peerId,
+    autoAccept,
+    roomId: routeRoomId,
+  } = useLocalSearchParams<{
+    peer: string;
+    autoAccept?: string;
+    roomId?: string;
+  }>();
   const me = useChatStore((s) => s.me);
   const conversations = useChatStore((s) => s.conversations);
   const currentUserId = me?._id ?? me?.userId;
@@ -46,14 +54,36 @@ export default function PsychiatristDirectChatScreen() {
   const flatListRef = useRef<FlatList>(null);
   const tempMessageIds = useRef<Set<string>>(new Set());
 
-  const [callState, setCallState] = useState<CallState>("idle");
-  const [incomingCaller, setIncomingCaller] = useState<string | null>(null);
-  const [callRoomId, setCallRoomId] = useState<string | null>(null);
+  const [callState, setCallState] = useState<CallState>(
+    autoAccept === "1" ? "incall" : "idle"
+  );
+  const [incomingCaller, setIncomingCaller] = useState<string | null>(
+    autoAccept === "1" ? peerId ?? null : null
+  );
+  const [callRoomId, setCallRoomId] = useState<string | null>(
+    autoAccept === "1" ? routeRoomId ?? null : null
+  );
   const callTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const callStartRef = useRef<number>(0);
+  const callStartRef = useRef<number>(autoAccept === "1" ? Date.now() : 0);
   // Ref mirrors callState to avoid stale closures in socket handlers
-  const callStateRef = useRef<CallState>("idle");
+  const callStateRef = useRef<CallState>(autoAccept === "1" ? "incall" : "idle");
   const peerNameFetched = useRef(false);
+
+  useEffect(() => {
+    if (autoAccept === "1" && peerId) {
+      setCallState("incall");
+      callStateRef.current = "incall";
+      setIncomingCaller(peerId);
+      if (routeRoomId) setCallRoomId(routeRoomId);
+      const socket = getSocket();
+      if (socket) {
+        socket.emit("call-accepted", {
+          to: peerId,
+          roomId: routeRoomId ?? `room_${Date.now()}`,
+        });
+      }
+    }
+  }, [autoAccept, peerId, routeRoomId]);
 
   useEffect(() => {
     callStateRef.current = callState;
@@ -219,13 +249,12 @@ export default function PsychiatristDirectChatScreen() {
     };
 
     const onCallAccepted = ({ from, roomId }: { from: string; roomId?: string }) => {
-      if (callStateRef.current === "calling") {
-        if (roomId) setCallRoomId(roomId);
-        callStartRef.current = Date.now();
-        setCallState("incall");
-        callStateRef.current = "incall";
-        if (callTimerRef.current) clearTimeout(callTimerRef.current);
-      }
+      console.log("[Chat] onCallAccepted received:", from, roomId);
+      if (roomId) setCallRoomId(roomId);
+      callStartRef.current = Date.now();
+      setCallState("incall");
+      callStateRef.current = "incall";
+      if (callTimerRef.current) clearTimeout(callTimerRef.current);
     };
 
     const onCallDeclined = ({ from }: { from?: string }) => {
@@ -376,7 +405,10 @@ export default function PsychiatristDirectChatScreen() {
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+        <TouchableOpacity
+          style={styles.backBtn}
+          onPress={() => router.replace("/(tabs)/(psychiatrist-tabs)/chats" as any)}
+        >
           <Feather name="chevron-left" size={28} color="#000" />
         </TouchableOpacity>
 

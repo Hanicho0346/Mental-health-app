@@ -159,10 +159,21 @@ export default function GroupChatsScreen() {
     );
   };
 
+  const handleGoBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace("/(tabs)/(user-tabs)/chats" as never);
+    }
+  };
+
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
+          <TouchableOpacity style={styles.backBtn} onPress={handleGoBack} activeOpacity={0.7}>
+            <Feather name="chevron-left" size={28} color="#111827" />
+          </TouchableOpacity>
           <Text style={styles.headerTitle}>Group Chats</Text>
           <View
             style={[styles.connectionDot, connected ? styles.dotOnline : styles.dotOffline]}
@@ -179,6 +190,9 @@ export default function GroupChatsScreen() {
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
       <View style={styles.header}>
+        <TouchableOpacity style={styles.backBtn} onPress={handleGoBack} activeOpacity={0.7}>
+          <Feather name="chevron-left" size={28} color="#111827" />
+        </TouchableOpacity>
         <Text style={styles.headerTitle}>Group Chats</Text>
         <View style={styles.headerActions}>
           <TouchableOpacity
@@ -226,7 +240,17 @@ export default function GroupChatsScreen() {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Create New Group</Text>
+            <View style={styles.modalHeaderRow}>
+              <TouchableOpacity
+                style={styles.modalBackIcon}
+                onPress={() => setModalVisible(false)}
+                activeOpacity={0.7}
+              >
+                <Feather name="arrow-left" size={22} color="#111827" />
+              </TouchableOpacity>
+              <Text style={styles.modalTitle}>Create New Group</Text>
+              <View style={{ width: 28 }} />
+            </View>
             <Text style={styles.modalLabel}>Group Name</Text>
             <TextInput
               style={styles.modalInput}
@@ -277,7 +301,8 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#f3f4f6",
   },
-  headerTitle: { flex: 1, fontSize: 28, fontWeight: "bold", color: "#111827" },
+  backBtn: { paddingRight: 8, paddingVertical: 4 },
+  headerTitle: { flex: 1, fontSize: 24, fontWeight: "bold", color: "#111827" },
   headerActions: { flexDirection: "row", alignItems: "center", gap: 16 },
   connectionDot: { width: 10, height: 10, borderRadius: 5 },
   dotOnline: { backgroundColor: "#22c55e" },
@@ -376,11 +401,20 @@ const styles = StyleSheet.create({
     width: "90%",
     maxWidth: 400,
   },
+  modalHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 16,
+  },
+  modalBackIcon: {
+    padding: 4,
+  },
   modalTitle: {
+    flex: 1,
     fontSize: 20,
     fontWeight: "bold",
     color: "#111827",
-    marginBottom: 16,
     textAlign: "center",
   },
   modalLabel: {

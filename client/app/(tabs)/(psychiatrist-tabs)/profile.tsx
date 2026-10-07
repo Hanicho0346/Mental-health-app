@@ -165,7 +165,7 @@ useFocusEffect(
 
                 <View style={{ flex: 1, marginLeft: 12 }}>
                   <Text style={s.logoutTitle}>
-                    Log out <Text style={s.amharicRowTitle}>/ ውጣ</Text>
+                    Log out <Text style={{ fontSize: 13, color: "#6B7280" }}>/ ውጣ</Text>
                   </Text>
                   <Text style={s.logoutSubText}>
                     End this session on this device
@@ -302,7 +302,7 @@ function OverviewTab({ profile }: { profile: any }) {
           </View>
           <View style={s.accountRow}>
             <Text style={s.accountLabel}>Role</Text>
-            <Text style={s.accountValue} style={{ textTransform: "capitalize" }}>
+            <Text style={[s.accountValue, { textTransform: "capitalize" }]}>
               {profile?.role ?? "Psychiatrist"}
             </Text>
           </View>
@@ -347,9 +347,10 @@ function OverviewTab({ profile }: { profile: any }) {
 
 // ─── Documents tab ────────────────────────────────────────────────────────────
 function DocumentsTab({ profile }: { profile: any }) {
+  const Comp = DocumentsSection as any;
   return (
     <View style={s.section}>
-      <DocumentsSection
+      <Comp
         documents={profile?.uploaded_documents || []}
         onUpload={() => Alert.alert("Upload", "Upload coming soon")}
         onOpen={(doc: any) => console.log(doc)}
@@ -360,9 +361,10 @@ function DocumentsTab({ profile }: { profile: any }) {
 
 // ─── Wallet tab ───────────────────────────────────────────────────────────────
 function WalletTab({ profile }: { profile: any }) {
+  const Comp = WalletSection as any;
   return (
     <View style={s.section}>
-      <WalletSection
+      <Comp
         balance={profile?.wallet_balance ?? 0}
         currency={profile?.wallet_currency ?? "USD"}
         onWithdraw={() => Alert.alert("Withdraw", "Withdraw coming soon")}

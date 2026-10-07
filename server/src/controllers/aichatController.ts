@@ -97,12 +97,10 @@ export const sendMessage: RequestHandler = async (req, res) => {
 
     const candidateModels = [
       process.env.GEMINI_MODEL,
-      'gemini-3.8-flash',
-      'gemini-3.7-flash',
-      'gemini-3.5-flash',
-      'gemini-flash-latest',
-      'gemini-3.1-flash-lite',
-      'gemini-3.5-flash-lite',
+      'gemini-2.0-flash',
+      'gemini-1.5-flash',
+      'gemini-2.0-flash-lite',
+      'gemini-1.5-pro',
     ].filter((m, i, arr): m is string => Boolean(m) && arr.indexOf(m) === i);
 
     let aiResponse: string | undefined;

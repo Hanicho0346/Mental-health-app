@@ -162,9 +162,9 @@ export default function AdminWalletScreen() {
         <ActivityIndicator style={{ marginTop: 60 }} size="large" color="#2563EB" />
       ) : (
         <FlatList
-          data={tab === 'transactions' ? transactions : tab === 'bookings' ? bookings : []}
+          data={(tab === 'transactions' ? transactions : tab === 'bookings' ? bookings : []) as any[]}
           keyExtractor={(item: any) => item.id}
-          renderItem={tab === 'transactions' ? renderTx : renderBooking}
+          renderItem={(tab === 'transactions' ? renderTx : renderBooking) as any}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load(true)} tintColor="#2563EB" />}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={s.listContent}

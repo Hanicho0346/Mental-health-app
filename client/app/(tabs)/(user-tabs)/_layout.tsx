@@ -218,7 +218,7 @@ function GlobalIncomingCallOverlay() {
   const [callerName, setCallerName] = useState<string>("");
   const callerIdRef  = useRef<string | null>(null);
   const roomIdRef    = useRef<string | null>(null);
-  const timerRef     = useRef<NodeJS.Timeout | null>(null);
+  const timerRef     = useRef<any>(null);
   const conversations = useChatStore((s) => s.conversations);
 
   useEffect(() => {
@@ -278,15 +278,15 @@ function GlobalIncomingCallOverlay() {
     const roomId   = roomIdRef.current;
     if (!callerId || !roomId) return;
 
-    const socket = getSocket();
-    if (socket) {
-      socket.emit("call-accepted", { to: callerId, roomId });
-    }
-
     dismiss();
-    // Navigate to the chat screen with this psychiatrist — it will pick up
-    // the incall state via the call-accepted event already emitted above.
-    router.push(`/(tabs)/(user-tabs)/chats/${callerId}` as any);
+    router.push({
+      pathname: "/(tabs)/(user-tabs)/chats/[peer]",
+      params: {
+        peer: callerId,
+        autoAccept: "1",
+        roomId,
+      },
+    } as any);
   };
 
   if (!visible) return null;

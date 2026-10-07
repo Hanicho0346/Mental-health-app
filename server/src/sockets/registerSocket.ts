@@ -280,26 +280,29 @@ export function registerSocketHandlers(io: IOServer): void {
       );
 
       socket.on('call-accepted', ({ to, roomId }: { to: string; roomId: string }) => {
-        const rid = onlineUsers[to];
-        if (rid) io.to(rid).emit('call-accepted', { from: userId, roomId });
+        logServerInfo('socket.call-accepted', { from: userId, to, roomId });
+        // Emit only once via the user's persistent room (socket already joined it on connect)
+        io.to(roomForUser(to)).emit('call-accepted', { from: userId, roomId });
       });
 
       socket.on('call-declined', ({ to }: { to: string }) => {
-        const rid = onlineUsers[to];
-        if (rid) io.to(rid).emit('call-declined', { from: userId });
+        logServerInfo('socket.call-declined', { from: userId, to });
+        io.to(roomForUser(to)).emit('call-declined', { from: userId });
       });
 
       socket.on('webrtc-signal', ({ to, signal }: { to: string; signal: unknown }) => {
         if (!to || !mongoose.Types.ObjectId.isValid(to)) return;
         if (!signal || typeof signal !== 'object') return;
-        const rid = onlineUsers[to];
-        if (rid) io.to(rid).emit('webrtc-signal', { from: userId, signal });
+        const sigType = (signal as { type?: string })?.type ?? 'unknown';
+        logServerInfo('socket.webrtc-signal', { from: userId, to, type: sigType });
+        // Emit only once via the user's persistent room to avoid duplicate signal handling
+        io.to(roomForUser(to)).emit('webrtc-signal', { from: userId, signal });
       });
 
       socket.on('call-ended', async ({ to, duration }: { to: string; duration: number }) => {
         try {
-          const rid = onlineUsers[to];
-          if (rid) io.to(rid).emit('call-ended', { from: userId });
+          logServerInfo('socket.call-ended', { from: userId, to, duration });
+          io.to(roomForUser(to)).emit('call-ended', { from: userId });
 
           const data = (socket.data as { callData?: { callerId?: string; recipientId?: string; startedAt?: Date } })
             .callData;

@@ -84,7 +84,7 @@ const C = {
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
 type Tab = "dashboard" | "psychiatrists" | "users" | "profile";
-type PsychSubTab = "pending" | "approved";
+type PsychSubTab = "all" | "pending" | "approved";
 
 type Stats = {
   total_users: number;

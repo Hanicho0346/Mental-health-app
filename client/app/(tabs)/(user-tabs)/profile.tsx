@@ -262,7 +262,7 @@ function PremierCard({
         {/* Daily Streak */}
         <TouchableOpacity
           style={premierStyles.pill}
-          onPress={() => router.push("/streak")}
+          onPress={() => router.push("/streak" as any)}
         >
           <View
             style={[premierStyles.pillIcon, { backgroundColor: "#FFF7ED" }]}

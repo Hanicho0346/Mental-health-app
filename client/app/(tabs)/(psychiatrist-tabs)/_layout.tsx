@@ -224,10 +224,16 @@ function GlobalIncomingCallOverlay() {
     const callerId = callerIdRef.current;
     const roomId   = roomIdRef.current;
     if (!callerId || !roomId) return;
-    const socket = getSocket();
-    if (socket) socket.emit("call-accepted", { to: callerId, roomId });
+
     dismiss();
-    router.push(`/(tabs)/(psychiatrist-tabs)/chats/${callerId}` as any);
+    router.push({
+      pathname: "/(tabs)/(psychiatrist-tabs)/chats/[peer]",
+      params: {
+        peer: callerId,
+        autoAccept: "1",
+        roomId,
+      },
+    } as any);
   };
 
   if (!visible) return null;
